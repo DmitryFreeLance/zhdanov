@@ -1,0 +1,279 @@
+package ru.zhdanov.wbmaxbot.service;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.WaitUntilState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import ru.zhdanov.wbmaxbot.config.AppProperties;
+import ru.zhdanov.wbmaxbot.model.ReportRow;
+import ru.zhdanov.wbmaxbot.model.ReportSummary;
+import ru.zhdanov.wbmaxbot.model.ScrapeResult;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+@Service
+public class WildberriesScraper {
+
+    private static final Logger log = LoggerFactory.getLogger(WildberriesScraper.class);
+
+    private final AppProperties properties;
+    private final ObjectMapper objectMapper;
+
+    public WildberriesScraper(AppProperties properties, ObjectMapper objectMapper) {
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+    }
+
+    public ScrapeResult scrapeReport() {
+        Path storageStatePath = ensureStorageStateParent();
+        if (!Files.exists(storageStatePath)) {
+            throw new IllegalStateException("WB session file not found: " + storageStatePath + ". Run bootstrap mode first.");
+        }
+
+        try (Playwright playwright = Playwright.create()) {
+            Browser browser = playwright.chromium().launch(defaultLaunchOptions(properties.getWildberries().isHeadless()));
+            Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()
+                    .setLocale("ru-RU")
+                    .setStorageStatePath(storageStatePath);
+            try (BrowserContext context = browser.newContext(contextOptions)) {
+                context.addInitScript("""
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        """);
+                Page page = context.newPage();
+                page.navigate(properties.getWildberries().getReportUrl(),
+                        new Page.NavigateOptions()
+                                .setTimeout(timeoutMs())
+                                .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+                waitForReport(page, properties.getWildberries().getTimeout().toMillis());
+
+                if (page.url().contains("/auth/login")) {
+                    throw new IllegalStateException("WB session expired: page redirected to login");
+                }
+
+                String json = (String) page.evaluate(EXTRACT_REPORT_SCRIPT);
+                context.storageState(new BrowserContext.StorageStateOptions().setPath(storageStatePath));
+                return parseScrapeResult(json);
+            }
+        }
+    }
+
+    public Path bootstrapSession() {
+        Path storageStatePath = ensureStorageStateParent();
+        log.info("Starting WB bootstrap flow. A browser window will open for manual login.");
+
+        try (Playwright playwright = Playwright.create()) {
+            Browser browser = playwright.chromium().launch(defaultLaunchOptions(false));
+            try (BrowserContext context = browser.newContext(new Browser.NewContextOptions().setLocale("ru-RU"))) {
+                context.addInitScript("""
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        """);
+                Page page = context.newPage();
+                page.navigate(properties.getWildberries().getReportUrl(),
+                        new Page.NavigateOptions()
+                                .setTimeout(timeoutMs())
+                                .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+
+                long deadline = System.currentTimeMillis() + properties.getWildberries().getBootstrapTimeout().toMillis();
+                while (System.currentTimeMillis() < deadline) {
+                    if (page.url().contains("/reports/remainders/last-mile/chart") && page.locator("table").count() > 0) {
+                        context.storageState(new BrowserContext.StorageStateOptions().setPath(storageStatePath));
+                        log.info("WB session saved to {}", storageStatePath.toAbsolutePath());
+                        return storageStatePath;
+                    }
+                    page.waitForTimeout(1000);
+                }
+                throw new IllegalStateException("Timed out waiting for manual Wildberries login");
+            }
+        }
+    }
+
+    private BrowserType.LaunchOptions defaultLaunchOptions(boolean headless) {
+        return new BrowserType.LaunchOptions()
+                .setHeadless(headless)
+                .setArgs(List.of(
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-dev-shm-usage",
+                        "--no-sandbox"
+                ));
+    }
+
+    private void waitForReport(Page page, double timeoutMs) {
+        long deadline = System.currentTimeMillis() + (long) timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (page.url().contains("/auth/login")) {
+                return;
+            }
+            if (page.locator("table").count() > 0 && page.locator("h1").count() > 0) {
+                return;
+            }
+            page.waitForTimeout(1000);
+        }
+        throw new IllegalStateException("Timed out waiting for WB report table");
+    }
+
+    private ScrapeResult parseScrapeResult(String json) {
+        try {
+            Map<String, Object> root = objectMapper.readValue(json, new TypeReference<>() {
+            });
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> rowsRaw = (List<Map<String, Object>>) root.getOrDefault("rows", List.of());
+            List<ReportRow> rows = new ArrayList<>();
+            for (Map<String, Object> row : rowsRaw) {
+                rows.add(new ReportRow(
+                        asText(row.get("loName")),
+                        asText(row.get("autoRequests")),
+                        asText(row.get("pickupTime")),
+                        asText(row.get("route")),
+                        asText(row.get("parking")),
+                        asInt(row.get("boxes")),
+                        asInt(row.get("kgt")),
+                        asInt(row.get("shk")),
+                        asInt(row.get("norm")),
+                        asDouble(row.get("ratio")),
+                        asNullableDouble(row.get("volumeLiters")),
+                        asNullableDouble(row.get("averageAccumulationLiters")),
+                        asNullableDouble(row.get("distanceKm")),
+                        objectMapper.writeValueAsString(row)
+                ));
+            }
+
+            ReportSummary summary = new ReportSummary(
+                    asText(root.get("heading")),
+                    asLong(root.get("totalShk")),
+                    asLong(root.get("totalBoxes")),
+                    asLong(root.get("totalKgt")),
+                    asDouble(root.get("totalVolumeLiters")),
+                    rows.size()
+            );
+
+            return new ScrapeResult(
+                    OffsetDateTime.now(ZoneId.of(properties.getZoneId())),
+                    summary,
+                    rows
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to parse WB scrape result", e);
+        }
+    }
+
+    private long timeoutMs() {
+        return properties.getWildberries().getTimeout().toMillis();
+    }
+
+    private Path ensureStorageStateParent() {
+        try {
+            Path storageStatePath = properties.getWildberries().getStorageStatePath().toAbsolutePath().normalize();
+            Files.createDirectories(storageStatePath.getParent());
+            return storageStatePath;
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to create storage state directory", e);
+        }
+    }
+
+    private String asText(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private int asInt(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return Integer.parseInt(String.valueOf(value));
+    }
+
+    private long asLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.parseLong(String.valueOf(value));
+    }
+
+    private double asDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        return Double.parseDouble(String.valueOf(value));
+    }
+
+    private Double asNullableDouble(Object value) {
+        return value == null ? null : asDouble(value);
+    }
+
+    private static final String EXTRACT_REPORT_SCRIPT = """
+            () => JSON.stringify((() => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const parseNumber = (value) => {
+                const clean = String(value || '')
+                  .replace(/\\s+/g, '')
+                  .replace(/,/g, '.')
+                  .replace(/[^0-9.\\-]/g, '');
+                if (!clean) return 0;
+                const result = Number(clean);
+                return Number.isFinite(result) ? result : 0;
+              };
+
+              const heading = normalize(document.querySelector('h1')?.textContent) || document.title;
+              const table = document.querySelector('table');
+              if (!table) {
+                return {
+                  heading,
+                  totalShk: 0,
+                  totalBoxes: 0,
+                  totalKgt: 0,
+                  totalVolumeLiters: 0,
+                  rows: []
+                };
+              }
+
+              const rows = Array.from(table.querySelectorAll('tbody tr')).map((tr) => {
+                const cells = Array.from(tr.querySelectorAll('td')).map((td) => normalize(td.textContent));
+                return {
+                  loName: cells[1] || '',
+                  autoRequests: cells[2] || '',
+                  pickupTime: cells[3] || '',
+                  route: cells[4] || '',
+                  parking: cells[5] || '',
+                  boxes: parseNumber(cells[6]),
+                  kgt: parseNumber(cells[7]),
+                  shk: parseNumber(cells[8]),
+                  norm: parseNumber(cells[9]),
+                  ratio: parseNumber(cells[9]) ? Number((parseNumber(cells[8]) / parseNumber(cells[9])).toFixed(4)) : 0,
+                  volumeLiters: parseNumber(cells[10]),
+                  averageAccumulationLiters: parseNumber(cells[11]),
+                  distanceKm: parseNumber(cells[12])
+                };
+              });
+
+              const totals = rows.reduce((acc, row) => {
+                acc.totalShk += row.shk;
+                acc.totalBoxes += row.boxes;
+                acc.totalKgt += row.kgt;
+                acc.totalVolumeLiters += row.volumeLiters;
+                return acc;
+              }, { totalShk: 0, totalBoxes: 0, totalKgt: 0, totalVolumeLiters: 0 });
+
+              return {
+                heading,
+                totalShk: totals.totalShk,
+                totalBoxes: totals.totalBoxes,
+                totalKgt: totals.totalKgt,
+                totalVolumeLiters: Number(totals.totalVolumeLiters.toFixed(2)),
+                rows
+              };
+            })())
+            """;
+}

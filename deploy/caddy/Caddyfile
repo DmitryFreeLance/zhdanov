@@ -1,0 +1,5 @@
+{$APP_MAX_DOMAIN} {
+    encode gzip zstd
+
+    reverse_proxy wb-max-bot:8080
+}

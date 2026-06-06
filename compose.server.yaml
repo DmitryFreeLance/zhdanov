@@ -1,0 +1,29 @@
+services:
+  wb-max-bot:
+    build: .
+    container_name: wb-max-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: wb-max-bot-caddy
+    restart: unless-stopped
+    depends_on:
+      - wb-max-bot
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
