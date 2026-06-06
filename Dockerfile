@@ -12,7 +12,7 @@ RUN mvn -q -DskipTests package
 FROM eclipse-temurin:21-jre
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg fonts-liberation libu2f-udev xdg-utils \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg fonts-liberation xdg-utils \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
     && chmod a+r /etc/apt/keyrings/google-chrome.gpg \
