@@ -1,0 +1,8 @@
+target/
+data/
+.git/
+.idea/
+.vscode/
+.DS_Store
+*.log
+playwright-report/
