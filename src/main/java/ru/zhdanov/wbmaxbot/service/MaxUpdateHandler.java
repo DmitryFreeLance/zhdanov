@@ -24,8 +24,8 @@ public class MaxUpdateHandler {
 
     public void handle(JsonNode update) {
         String updateType = update.path("update_type").asText("");
-        long chatId = update.path("chat_id").asLong(0);
-        Long userId = update.path("user").path("user_id").isMissingNode() ? null : update.path("user").path("user_id").asLong();
+        long chatId = extractChatId(update);
+        Long userId = extractUserId(update);
 
         switch (updateType) {
             case "bot_started" -> {
@@ -40,10 +40,12 @@ public class MaxUpdateHandler {
 
     private void handleMessage(long chatId, Long userId, String title, String chatType, String text) {
         if (chatId <= 0 || text == null || text.isBlank()) {
+            log.warn("Ignoring MAX message_created update without chat/text. chatId={}, textPresent={}", chatId, text != null && !text.isBlank());
             return;
         }
 
         String command = text.trim().toLowerCase();
+        log.info("Handling MAX command '{}' for chat {}", command, chatId);
         switch (command) {
             case "/start", "/help", "/subscribe" -> {
                 maxMessagingService.subscribe(chatId, userId, title, chatType);
@@ -74,6 +76,9 @@ public class MaxUpdateHandler {
         if (update.path("chat").hasNonNull("title")) {
             return update.path("chat").path("title").asText();
         }
+        if (update.path("message").path("recipient").hasNonNull("chat_id")) {
+            return "MAX chat " + update.path("message").path("recipient").path("chat_id").asText();
+        }
         return "MAX chat " + update.path("chat_id").asText();
     }
 
@@ -95,5 +100,31 @@ public class MaxUpdateHandler {
             return update.path("text").asText();
         }
         return "";
+    }
+
+    private long extractChatId(JsonNode update) {
+        if (update.hasNonNull("chat_id")) {
+            return update.path("chat_id").asLong(0);
+        }
+        if (update.path("message").path("recipient").hasNonNull("chat_id")) {
+            return update.path("message").path("recipient").path("chat_id").asLong(0);
+        }
+        if (update.path("recipient").hasNonNull("chat_id")) {
+            return update.path("recipient").path("chat_id").asLong(0);
+        }
+        return 0;
+    }
+
+    private Long extractUserId(JsonNode update) {
+        if (update.path("user").hasNonNull("user_id")) {
+            return update.path("user").path("user_id").asLong();
+        }
+        if (update.path("message").path("sender").hasNonNull("user_id")) {
+            return update.path("message").path("sender").path("user_id").asLong();
+        }
+        if (update.path("sender").hasNonNull("user_id")) {
+            return update.path("sender").path("user_id").asLong();
+        }
+        return null;
     }
 }
