@@ -102,13 +102,18 @@ public class WildberriesScraper {
     }
 
     private BrowserType.LaunchOptions defaultLaunchOptions(boolean headless) {
-        return new BrowserType.LaunchOptions()
+        BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
                 .setHeadless(headless)
                 .setArgs(List.of(
                         "--disable-blink-features=AutomationControlled",
                         "--disable-dev-shm-usage",
                         "--no-sandbox"
                 ));
+        String browserExecutablePath = properties.getWildberries().getBrowserExecutablePath();
+        if (browserExecutablePath != null && !browserExecutablePath.isBlank()) {
+            options.setExecutablePath(Path.of(browserExecutablePath));
+        }
+        return options;
     }
 
     private void waitForReport(Page page, double timeoutMs) {

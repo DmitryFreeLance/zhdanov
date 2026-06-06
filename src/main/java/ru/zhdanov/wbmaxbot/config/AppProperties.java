@@ -150,6 +150,7 @@ public class AppProperties {
         private String reportUrl = "https://logistics.wildberries.ru/reports/remainders/last-mile/chart";
 
         private boolean headless = true;
+        private String browserExecutablePath;
         private Duration timeout = Duration.ofSeconds(45);
         private Duration bootstrapTimeout = Duration.ofMinutes(30);
         @NotNull
@@ -169,6 +170,14 @@ public class AppProperties {
 
         public void setHeadless(boolean headless) {
             this.headless = headless;
+        }
+
+        public String getBrowserExecutablePath() {
+            return browserExecutablePath;
+        }
+
+        public void setBrowserExecutablePath(String browserExecutablePath) {
+            this.browserExecutablePath = browserExecutablePath;
         }
 
         public Duration getTimeout() {

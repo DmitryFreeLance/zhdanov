@@ -33,6 +33,7 @@ app:
   wildberries:
     report-url: https://logistics.wildberries.ru/reports/remainders/last-mile/chart
     headless: true
+    browser-executable-path:
     timeout: PT45S
     bootstrap-timeout: PT30M
     storage-state-path: ./data/wb-storage-state.json
