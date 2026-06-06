@@ -28,8 +28,8 @@ app:
   database-path: ./data/wb-max-bot.db
   scheduler:
     enabled: true
-    fixed-delay: PT10M
-    initial-delay: PT1M
+    fixed-delay: PT1M
+    initial-delay: PT30S
   wildberries:
     report-url: https://logistics.wildberries.ru/reports/remainders/last-mile/chart
     headless: true

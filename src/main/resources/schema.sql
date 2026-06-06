@@ -4,6 +4,14 @@ create table if not exists chat_subscription (
     title text,
     chat_type text not null,
     active integer not null default 1,
+    auto_report_enabled integer not null default 1,
+    report_interval_minutes integer not null default 15,
+    last_report_sent_at text,
+    shk_threshold integer default 1200,
+    ratio_threshold real default 0.9,
+    call_enabled integer not null default 0,
+    phone_number text,
+    pending_input_state text,
     created_at text not null,
     last_seen_at text not null
 );

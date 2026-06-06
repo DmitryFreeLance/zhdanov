@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import ru.zhdanov.wbmaxbot.config.AppProperties;
 import ru.zhdanov.wbmaxbot.model.AlertTrigger;
+import ru.zhdanov.wbmaxbot.model.ChatSubscription;
 import ru.zhdanov.wbmaxbot.model.ReportRow;
 import ru.zhdanov.wbmaxbot.model.ScrapeResult;
 import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
@@ -17,7 +18,9 @@ import java.nio.file.Files;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -30,6 +33,7 @@ public class ReportCoordinator {
     private final NotificationFormatter notificationFormatter;
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
+    private final ChatSettingsService chatSettingsService;
     private final ReportRepository reportRepository;
     private final AlertEventRepository alertEventRepository;
     private final ObjectMapper objectMapper;
@@ -40,6 +44,7 @@ public class ReportCoordinator {
                              NotificationFormatter notificationFormatter,
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
+                             ChatSettingsService chatSettingsService,
                              ReportRepository reportRepository,
                              AlertEventRepository alertEventRepository,
                              ObjectMapper objectMapper) {
@@ -48,6 +53,7 @@ public class ReportCoordinator {
         this.notificationFormatter = notificationFormatter;
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
+        this.chatSettingsService = chatSettingsService;
         this.reportRepository = reportRepository;
         this.alertEventRepository = alertEventRepository;
         this.objectMapper = objectMapper;
@@ -73,24 +79,24 @@ public class ReportCoordinator {
     }
 
     private void executeInternal(String source, Long manualChatId) {
+        List<ChatSubscription> targetChats = manualChatId != null
+                ? List.of(chatSettingsService.getRequired(manualChatId))
+                : chatSettingsService.findChatsDueForAutoReport(OffsetDateTime.now(zoneId));
+        if (targetChats.isEmpty()) {
+            return;
+        }
+
         try {
             ScrapeResult result = wildberriesScraper.scrapeReport();
             List<String> reportMessages = notificationFormatter.buildReportMessages(result, properties.getAlert().getMaxRowsInMessage());
-            String messageStatus = "skipped";
+            Map<Long, String> messageStatuses = new LinkedHashMap<>();
 
-            if (manualChatId != null) {
-                for (String message : reportMessages) {
-                    maxMessagingService.sendToChat(manualChatId, message);
-                }
-                messageStatus = "manual-chat=" + manualChatId;
-            } else if (properties.getAlert().isSendReportEachRun()) {
-                messageStatus = maxMessagingService.sendToActiveChats(reportMessages);
-            }
+            messageStatuses = sendReportMessages(targetChats, reportMessages, manualChatId == null, result.scrapedAt());
 
             long runId = reportRepository.saveSuccessfulRun(result, source, toJson(result.summary()), String.join("\n\n---\n\n", reportMessages));
             log.info("Stored report run {}", runId);
 
-            processAlerts(result, messageStatus);
+            processAlerts(result, targetChats, messageStatuses);
         } catch (Exception e) {
             log.error("Report execution failed", e);
             reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", e.getMessage());
@@ -100,46 +106,74 @@ public class ReportCoordinator {
         }
     }
 
-    private void processAlerts(ScrapeResult result, String baseMessageStatus) {
-        for (AlertTrigger trigger : evaluateTriggers(result)) {
-            if (isSuppressedByCooldown(trigger.dedupeKey())) {
-                continue;
+    private Map<Long, String> sendReportMessages(List<ChatSubscription> targetChats,
+                                                 List<String> reportMessages,
+                                                 boolean markAsScheduledSend,
+                                                 OffsetDateTime scrapedAt) {
+        Map<Long, String> statuses = new LinkedHashMap<>();
+        for (ChatSubscription chat : targetChats) {
+            String status = "sent=0, failed=0";
+            int successCount = 0;
+            int failureCount = 0;
+            for (String message : reportMessages) {
+                status = maxMessagingService.sendToChat(chat.chatId(), message);
+                if (status.startsWith("sent")) {
+                    successCount++;
+                } else {
+                    failureCount++;
+                }
             }
+            statuses.put(chat.chatId(), "sent=" + successCount + ", failed=" + failureCount);
+            if (markAsScheduledSend && failureCount == 0) {
+                chatSettingsService.markReportSent(chat.chatId(), scrapedAt);
+            }
+        }
+        return statuses;
+    }
 
-            boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled();
-            String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled);
-            String messageStatus = maxMessagingService.sendToActiveChats(List.of(alertMessage));
-            VoiceCallResult callResult = voiceCallEnabled
-                    ? voiceAlertService.callAllTargets(notificationFormatter.buildVoiceText(trigger))
-                    : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+    private void processAlerts(ScrapeResult result, List<ChatSubscription> targetChats, Map<Long, String> baseMessageStatuses) {
+        for (ChatSubscription chat : targetChats) {
+            for (AlertTrigger trigger : evaluateTriggers(result, chat)) {
+                String dedupeKey = chat.chatId() + ":" + trigger.dedupeKey();
+                if (isSuppressedByCooldown(dedupeKey)) {
+                    continue;
+                }
 
-            alertEventRepository.save(
-                    OffsetDateTime.now(zoneId),
-                    trigger.dedupeKey(),
-                    trigger.row().route(),
-                    trigger.row().parking(),
-                    trigger.row().shk(),
-                    trigger.row().norm(),
-                    trigger.row().ratio(),
-                    trigger.reason(),
-                    mergeStatuses(baseMessageStatus, messageStatus),
-                    callResult.provider(),
-                    voiceCallEnabled ? (callResult.success() ? "success" : "failed") : "skipped",
-                    callResult.externalId(),
-                    callResult.details()
-            );
+                boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled() && chat.callEnabled();
+                String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled);
+                String messageStatus = maxMessagingService.sendToChat(chat.chatId(), alertMessage);
+                VoiceCallResult callResult = voiceCallEnabled
+                        ? voiceAlertService.callTarget(chat.phoneNumber(), notificationFormatter.buildVoiceText(trigger))
+                        : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+
+                alertEventRepository.save(
+                        OffsetDateTime.now(zoneId),
+                        dedupeKey,
+                        trigger.row().route(),
+                        trigger.row().parking(),
+                        trigger.row().shk(),
+                        trigger.row().norm(),
+                        trigger.row().ratio(),
+                        trigger.reason(),
+                        mergeStatuses(baseMessageStatuses.getOrDefault(chat.chatId(), "not-sent"), messageStatus),
+                        callResult.provider(),
+                        voiceCallEnabled ? (callResult.success() ? "success" : "failed") : "skipped",
+                        callResult.externalId(),
+                        callResult.details()
+                );
+            }
         }
     }
 
-    private List<AlertTrigger> evaluateTriggers(ScrapeResult result) {
+    private List<AlertTrigger> evaluateTriggers(ScrapeResult result, ChatSubscription chat) {
         List<AlertTrigger> triggers = new ArrayList<>();
         for (ReportRow row : result.rows()) {
             List<String> reasons = new ArrayList<>();
-            if (properties.getAlert().getShkThreshold() > 0 && row.shk() >= properties.getAlert().getShkThreshold()) {
-                reasons.add("ШК >= " + properties.getAlert().getShkThreshold());
+            if (chat.shkThreshold() != null && chat.shkThreshold() > 0 && row.shk() >= chat.shkThreshold()) {
+                reasons.add("ШК >= " + chat.shkThreshold());
             }
-            if (properties.getAlert().getRatioThreshold() > 0 && row.ratio() >= properties.getAlert().getRatioThreshold()) {
-                reasons.add("Заполнение >= " + Math.round(properties.getAlert().getRatioThreshold() * 100) + "%");
+            if (chat.ratioThreshold() != null && chat.ratioThreshold() > 0 && row.ratio() >= chat.ratioThreshold()) {
+                reasons.add("Заполнение >= " + Math.round(chat.ratioThreshold() * 100) + "%");
             }
             if (!reasons.isEmpty()) {
                 triggers.add(new AlertTrigger(row.route() + "#" + row.parking(), row, String.join(", ", reasons)));

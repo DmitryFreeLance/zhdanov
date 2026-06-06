@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import ru.zhdanov.wbmaxbot.config.AppProperties;
+import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
 
 import java.io.IOException;
 import java.net.URI;
@@ -40,6 +41,10 @@ public class MaxApiClient {
     }
 
     public void sendMessage(long chatId, String text) {
+        sendMessage(chatId, new MaxOutgoingMessage(text));
+    }
+
+    public void sendMessage(long chatId, MaxOutgoingMessage message) {
         if (!isEnabled()) {
             log.info("MAX disabled, skipping message to chat {}", chatId);
             return;
@@ -48,10 +53,13 @@ public class MaxApiClient {
         try {
             String query = "chat_id=" + URLEncoder.encode(String.valueOf(chatId), StandardCharsets.UTF_8);
             URI uri = URI.create(properties.getMax().getBaseUrl() + "/messages?" + query);
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "text", text,
-                    "notify", true
-            ));
+            Map<String, Object> bodyPayload = new LinkedHashMap<>();
+            bodyPayload.put("text", message.text());
+            bodyPayload.put("notify", message.notifyUsers());
+            if (message.attachments() != null && !message.attachments().isEmpty()) {
+                bodyPayload.put("attachments", message.attachments());
+            }
+            String body = objectMapper.writeValueAsString(bodyPayload);
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("Authorization", properties.getMax().getToken())
                     .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
@@ -67,6 +75,46 @@ public class MaxApiClient {
             throw new IllegalStateException("Failed to send MAX message", e);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to send MAX message", e);
+        }
+    }
+
+    public void answerCallback(String callbackId, String notification, MaxOutgoingMessage message) {
+        if (!isEnabled() || callbackId == null || callbackId.isBlank()) {
+            return;
+        }
+
+        try {
+            URI uri = URI.create(properties.getMax().getBaseUrl() + "/answers?callback_id="
+                    + URLEncoder.encode(callbackId, StandardCharsets.UTF_8));
+            Map<String, Object> bodyPayload = new LinkedHashMap<>();
+            if (notification != null && !notification.isBlank()) {
+                bodyPayload.put("notification", notification);
+            }
+            if (message != null) {
+                Map<String, Object> messagePayload = new LinkedHashMap<>();
+                messagePayload.put("text", message.text());
+                messagePayload.put("notify", message.notifyUsers());
+                if (message.attachments() != null && !message.attachments().isEmpty()) {
+                    messagePayload.put("attachments", message.attachments());
+                }
+                bodyPayload.put("message", messagePayload);
+            }
+
+            String body = objectMapper.writeValueAsString(bodyPayload);
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .header("Authorization", properties.getMax().getToken())
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                throw new IllegalStateException("MAX answerCallback failed: HTTP " + response.statusCode() + " " + response.body());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Failed to answer MAX callback", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to answer MAX callback", e);
         }
     }
 
@@ -88,7 +136,7 @@ public class MaxApiClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("url", properties.getMax().getPublicWebhookUrl());
-        payload.put("update_types", List.of("bot_started", "bot_stopped", "bot_removed", "dialog_removed", "message_created"));
+        payload.put("update_types", List.of("bot_started", "bot_stopped", "bot_removed", "dialog_removed", "message_created", "message_callback"));
         if (hasText(properties.getMax().getWebhookSecret())) {
             payload.put("secret", properties.getMax().getWebhookSecret());
         }
@@ -129,7 +177,7 @@ public class MaxApiClient {
             StringJoiner query = new StringJoiner("&");
             query.add("limit=" + properties.getMax().getLongPollingLimit());
             query.add("timeout=" + properties.getMax().getLongPollingTimeout().toSeconds());
-            query.add("types=bot_started,message_created,bot_stopped,bot_removed,dialog_removed");
+            query.add("types=bot_started,message_created,message_callback,bot_stopped,bot_removed,dialog_removed");
             if (marker != null) {
                 query.add("marker=" + marker);
             }

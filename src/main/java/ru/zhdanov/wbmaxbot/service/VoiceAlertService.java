@@ -37,4 +37,15 @@ public class VoiceAlertService {
         }
         return lastResult;
     }
+
+    public VoiceCallResult callTarget(String targetNumber, String spokenText) {
+        TelephonyProvider provider = providers.getOrDefault(properties.getTelephony().getProvider(), noopTelephonyProvider);
+        if (!provider.isConfigured()) {
+            return VoiceCallResult.failure(provider.providerName(), "Provider is not configured");
+        }
+        if (targetNumber == null || targetNumber.isBlank()) {
+            return VoiceCallResult.failure(provider.providerName(), "No target number configured");
+        }
+        return provider.call(targetNumber, spokenText);
+    }
 }

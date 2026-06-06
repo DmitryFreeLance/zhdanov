@@ -117,8 +117,8 @@ public class AppProperties {
 
     public static class Scheduler {
         private boolean enabled = true;
-        private Duration fixedDelay = Duration.ofMinutes(10);
-        private Duration initialDelay = Duration.ofMinutes(1);
+        private Duration fixedDelay = Duration.ofMinutes(1);
+        private Duration initialDelay = Duration.ofSeconds(30);
 
         public boolean isEnabled() {
             return enabled;

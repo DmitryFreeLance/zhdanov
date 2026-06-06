@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import ru.zhdanov.wbmaxbot.client.MaxApiClient;
 import ru.zhdanov.wbmaxbot.model.ChatSubscription;
+import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
 import ru.zhdanov.wbmaxbot.repository.SubscriptionRepository;
 
 import java.time.OffsetDateTime;
@@ -45,6 +46,10 @@ public class MaxMessagingService {
     }
 
     public String sendToChat(long chatId, String message) {
+        return sendToChat(chatId, new MaxOutgoingMessage(message));
+    }
+
+    public String sendToChat(long chatId, MaxOutgoingMessage message) {
         try {
             maxApiClient.sendMessage(chatId, message);
             return "sent";
@@ -77,6 +82,19 @@ public class MaxMessagingService {
 
     public void sendWelcome(long chatId, String welcomeMessage) {
         sendToChat(chatId, welcomeMessage);
+    }
+
+    public void answerCallback(long chatId, String callbackId, String notification, MaxOutgoingMessage message) {
+        try {
+            maxApiClient.answerCallback(callbackId, notification, message);
+        } catch (Exception e) {
+            log.error("Failed to answer MAX callback for chat {}", chatId, e);
+            if (message != null) {
+                sendToChat(chatId, message);
+            } else if (notification != null && !notification.isBlank()) {
+                sendToChat(chatId, notification);
+            }
+        }
     }
 
     public void registerWebhookIfNeeded() {
