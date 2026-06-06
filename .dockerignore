@@ -1,4 +1,5 @@
-target/
+target/*
+!target/wb-max-bot-1.0.0.jar
 data/
 .git/
 .idea/
