@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 
 @Component
 public class MaxApiClient {
@@ -73,6 +74,10 @@ public class MaxApiClient {
         if (!isEnabled()) {
             return;
         }
+        if (properties.getMax().isLongPollingEnabled()) {
+            log.info("Skipping MAX webhook registration because long polling is enabled");
+            return;
+        }
         if (!properties.getMax().isAutoRegisterWebhook()) {
             return;
         }
@@ -113,5 +118,45 @@ public class MaxApiClient {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    public MaxUpdatesResponse getUpdates(Long marker) {
+        if (!isEnabled()) {
+            return new MaxUpdatesResponse(List.of(), marker);
+        }
+
+        try {
+            StringJoiner query = new StringJoiner("&");
+            query.add("limit=" + properties.getMax().getLongPollingLimit());
+            query.add("timeout=" + properties.getMax().getLongPollingTimeout().toSeconds());
+            query.add("types=bot_started,message_created,bot_stopped,bot_removed,dialog_removed");
+            if (marker != null) {
+                query.add("marker=" + marker);
+            }
+
+            URI uri = URI.create(properties.getMax().getBaseUrl() + "/updates?" + query);
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .header("Authorization", properties.getMax().getToken())
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                throw new IllegalStateException("MAX getUpdates failed: HTTP " + response.statusCode() + " " + response.body());
+            }
+
+            JsonNode json = objectMapper.readTree(response.body());
+            List<JsonNode> updates = objectMapper.convertValue(json.path("updates"), objectMapper.getTypeFactory().constructCollectionType(List.class, JsonNode.class));
+            Long nextMarker = json.path("marker").isNull() || json.path("marker").isMissingNode() ? marker : json.path("marker").asLong();
+            return new MaxUpdatesResponse(updates, nextMarker);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Failed to get MAX updates", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to get MAX updates", e);
+        }
+    }
+
+    public record MaxUpdatesResponse(List<JsonNode> updates, Long marker) {
     }
 }

@@ -5,7 +5,7 @@
 - заходит в отчёт Wildberries `Остатки ПМ (новая версия)`
 - считывает строки таблицы `Парковка / Кол-во коробок / Кол-во КГТ / Кол-во ШК / Норма выезда ШК`
 - по расписанию отправляет отчёт в `MAX`
-- при превышении порогов запускает автозвонок через телефонию
+- при превышении порогов отправляет тревогу с напоминанием, что нужно позвонить
 - хранит подписки, снапшоты и историю алертов в `SQLite`
 
 ## Что входит в продукт
@@ -14,7 +14,8 @@
 - `SQLite` база для подписок, снапшотов и алертов
 - `Playwright` scraper для личного кабинета WB
 - интеграция с `MAX Bot API`
-- телефония через:
+- опциональная телефония на будущее через:
+  - `MANGO OFFICE` для callback-звонка в РФ
   - `Twilio` для полноценного голосового сообщения
   - `Zadarma` для callback-вызова
 - `Dockerfile`
@@ -29,6 +30,28 @@
 - `/unsubscribe` — отключить отчёты для текущего чата
 - `/help` — показать справку
 
+## Режимы MAX
+
+Проект умеет работать в двух режимах:
+
+- `Long Polling`
+- `Webhook`
+
+Если хотите максимально простой запуск без публичного входящего URL от `MAX`, используйте `Long Polling`.
+В этом режиме бот сам опрашивает `GET /updates`.
+
+Для `Long Polling` нужны:
+
+- `APP_MAX_ENABLED=true`
+- `APP_MAX_TOKEN=...`
+- `APP_MAX_LONG_POLLING_ENABLED=true`
+
+Для этого режима не обязательны:
+
+- `APP_MAX_DOMAIN`
+- `APP_MAX_PUBLIC_WEBHOOK_URL`
+- `APP_MAX_WEBHOOK_SECRET`
+
 ## Как работает
 
 1. Сервис по расписанию открывает страницу:
@@ -38,14 +61,16 @@
 3. Формирует сообщение “в столбик” и отправляет его в активные чаты `MAX`
 4. Если строка превысила порог:
    - бот отправляет тревожное сообщение в `MAX`
-   - запускается звонок на заданные номера
+   - в сообщении явно пишет, что нужно позвонить вручную
 5. Всё сохраняется в `SQLite`
 
 ## Ограничения, которые важно понимать
 
 - Для `MAX` нужен официальный бот. По документации MAX создание чат-ботов доступно юрлицам и ИП.
-- Для получения команд и автоподписок нужен публичный `HTTPS` webhook.
+- `Long Polling` в MAX официально есть, но сама документация MAX рекомендует его для разработки и тестов, а для production рекомендует `Webhook`.
 - Для WB сначала нужно один раз пройти авторизацию вручную и сохранить сессию.
+- В текущей поставке реальный обзвон по умолчанию отключён: бот работает как напоминалка для ручного звонка.
+- `MANGO OFFICE` в этой реализации инициирует callback-вызов. Если нужно именно зачитывать текст голосом, потребуется отдельный IVR/роботный сценарий в MANGO.
 - `Twilio` лучше подходит, если нужен именно голосовой текст в звонке.
 - `Zadarma` в этой реализации делает callback-вызов, но не озвучивает кастомный текст так гибко, как `Twilio`.
 
@@ -63,12 +88,48 @@ mkdir -p data
 Заполните минимум:
 
 - `APP_MAX_TOKEN`
+- `APP_MAX_LONG_POLLING_ENABLED=true`
+- `APP_ADMIN_TOKEN`
+- `APP_ALERT_VOICE_CALL_ENABLED=false`
+
+Для текущего режима “без звонков” телефонию можно не заполнять.
+
+### 1.1. Если позже захотите включить реальные звонки
+
+Сейчас это не требуется. Но если позже понадобится реальный автозвонок, в этой сборке удобнее всего подключать `MANGO OFFICE` и `MAX Long Polling`.
+
+Что взять в личном кабинете MANGO:
+
+- `Интеграции` → `API коннектор`
+- `Уникальный код вашей АТС` → `APP_TELEPHONY_MANGO_API_KEY`
+- `Ключ для создания подписи` → `APP_TELEPHONY_MANGO_API_SALT`
+- внутренний номер сотрудника, например `101` → `APP_TELEPHONY_MANGO_EXTENSION`
+- SIP-адрес или исходящий номер сотрудника → `APP_TELEPHONY_MANGO_FROM_NUMBER`
+- при необходимости номер линии АОН → `APP_TELEPHONY_MANGO_LINE_NUMBER`
+
+Пример:
+
+```env
+APP_MAX_ENABLED=true
+APP_MAX_TOKEN=replace_with_max_bot_token
+APP_MAX_LONG_POLLING_ENABLED=true
+APP_ADMIN_TOKEN=replace_with_admin_token
+
+APP_ALERT_VOICE_CALL_ENABLED=true
+APP_TELEPHONY_PROVIDER=mango
+APP_TELEPHONY_TARGET_NUMBERS=+79990000000
+APP_TELEPHONY_MANGO_API_KEY=replace_with_api_key
+APP_TELEPHONY_MANGO_API_SALT=replace_with_api_salt
+APP_TELEPHONY_MANGO_EXTENSION=101
+APP_TELEPHONY_MANGO_FROM_NUMBER=sip:employee@example.mangosip.ru
+APP_TELEPHONY_MANGO_LINE_NUMBER=
+```
+
+В режиме `Long Polling` эти переменные можно оставить пустыми:
+
+- `APP_MAX_DOMAIN`
 - `APP_MAX_PUBLIC_WEBHOOK_URL`
 - `APP_MAX_WEBHOOK_SECRET`
-- `APP_ADMIN_TOKEN`
-- телефонию:
-  - либо `APP_TELEPHONY_PROVIDER=twilio` и поля `APP_TELEPHONY_TWILIO_*`
-  - либо `APP_TELEPHONY_PROVIDER=zadarma` и поля `APP_TELEPHONY_ZADARMA_*`
 
 ### 2. Установите браузер Playwright
 
@@ -115,7 +176,7 @@ curl http://127.0.0.1:8080/actuator/health
 ### 6. Подпишите чат в MAX
 
 1. Создайте и опубликуйте бота на платформе `MAX`
-2. Настройте webhook на:
+2. Если используете `Webhook`, настройте endpoint:
    `https://ваш-домен/webhook/max`
 3. Откройте чат с ботом и нажмите `Начать`
 4. Бот сам подпишет этот чат
@@ -185,6 +246,11 @@ docker compose up -d --build
 - `Caddy` для автоматического `HTTPS`
 - ваш домен, например `bot.example.com`
 
+Если на сервере уже работают другие проекты, сначала проверьте, не заняты ли `80/443`.
+В таком случае безопаснее запускать только приложение на локальном порту через [compose.app-only.yaml](</Users/dmitry/Desktop/жданов 2/compose.app-only.yaml>) и подключать его к уже существующему `Nginx`/`Caddy`/`Traefik`.
+
+Если вы хотите именно `Long Polling`, домен и webhook можно не использовать вообще.
+
 ### 1. Подготовьте сервер
 
 Установите Docker:
@@ -235,16 +301,24 @@ mkdir -p data
 nano .env
 ```
 
-Минимально заполните:
+Минимально заполните для `Long Polling`:
+
+- `APP_MAX_TOKEN=...`
+- `APP_MAX_LONG_POLLING_ENABLED=true`
+- `APP_ADMIN_TOKEN=...`
+- `APP_ALERT_VOICE_CALL_ENABLED=false`
+
+Если позже захотите включить звонки:
+
+- `APP_TELEPHONY_PROVIDER=mango`, `twilio` или `zadarma`
+- ключи телефонии
+- `APP_TELEPHONY_TARGET_NUMBERS=+79...`
+
+Если хотите использовать `Webhook`, тогда дополнительно нужны:
 
 - `APP_MAX_DOMAIN=bot.example.com`
 - `APP_MAX_PUBLIC_WEBHOOK_URL=https://bot.example.com/webhook/max`
-- `APP_MAX_TOKEN=...`
 - `APP_MAX_WEBHOOK_SECRET=...`
-- `APP_ADMIN_TOKEN=...`
-- `APP_TELEPHONY_PROVIDER=twilio` или `zadarma`
-- ключи телефонии
-- `APP_TELEPHONY_TARGET_NUMBERS=+79...`
 
 ### 5. Очень важный шаг: файл сессии WB
 
@@ -283,7 +357,15 @@ docker compose -f compose.server.yaml ps
 docker compose -f compose.server.yaml logs -f wb-max-bot
 ```
 
-### 7. Проверьте HTTPS и health
+### 7. Проверьте health
+
+Для `Long Polling` достаточно:
+
+```bash
+curl http://127.0.0.1:18080/actuator/health
+```
+
+Если используете режим `Webhook` с доменом, тогда проверьте ещё и `HTTPS`:
 
 Когда `Caddy` выпустит сертификат:
 
@@ -294,6 +376,8 @@ curl https://bot.example.com/actuator/health
 Должно вернуть `UP`.
 
 ### 8. Подключите webhook в MAX
+
+Этот шаг нужен только для режима `Webhook`.
 
 Webhook должен смотреть на:
 
@@ -306,6 +390,8 @@ https://bot.example.com/webhook/max
 - `APP_MAX_AUTO_REGISTER_WEBHOOK=true`
 
 то сервис сам попробует зарегистрировать webhook в MAX при старте.
+
+Если используется `Long Polling`, этот шаг пропускается.
 
 ### 9. Откройте бота в MAX
 
@@ -347,15 +433,60 @@ curl -X POST \
   https://bot.example.com/api/admin/run-now
 ```
 
+## Безопасный запуск, если на сервере уже есть другие проекты
+
+### 1. Проверьте занятые порты
+
+```bash
+ss -ltnp | grep -E ':80 |:443 |:8080 |:18080 '
+```
+
+### 2. Если `80/443` уже заняты, не запускайте `compose.server.yaml`
+
+Используйте только приложение:
+
+```bash
+docker compose -f compose.app-only.yaml up -d --build
+```
+
+По умолчанию сервис будет слушать:
+
+```text
+127.0.0.1:18080
+```
+
+Порт можно изменить через:
+
+```text
+APP_HOST_PORT=18080
+```
+
+### 3. Проверьте локально на сервере
+
+```bash
+curl http://127.0.0.1:18080/actuator/health
+```
+
+### 4. Дальше подключите существующий reverse proxy
+
+Если у вас уже есть `Nginx` или `Caddy`, просто проксируйте домен на:
+
+```text
+http://127.0.0.1:18080
+```
+
 ### Частые проблемы
 
 - `бот не отвечает в MAX`
-  Обычно не настроен публичный `HTTPS` или неверный webhook URL.
+  Для `Webhook` обычно не настроен публичный `HTTPS` или неверный webhook URL. Для `Long Polling` обычно проблема в токене или в том, что пользователь не нажал `Начать`.
 
 - `редиректит на login в WB`
   Значит устарел файл `data/wb-storage-state.json`. Нужно заново пройти bootstrap локально и загрузить новый файл на сервер.
 
-- `звонки не идут`
+- `напоминания приходят, но звонка нет`
+  Если `APP_ALERT_VOICE_CALL_ENABLED=false`, это ожидаемо: бот только пишет, что нужно позвонить вручную.
+
+- `звонки не идут после включения телефонии`
   Обычно неверные ключи телефонии, неподходящий номер отправителя или ограничения провайдера.
 
 ## Основные переменные окружения
@@ -363,8 +494,9 @@ curl -X POST \
 - `APP_SCHEDULER_FIXED_DELAY=PT10M` — как часто отправлять отчёт
 - `APP_ALERT_SHK_THRESHOLD=1200` — порог по ШК
 - `APP_ALERT_RATIO_THRESHOLD=0.9` — порог по заполнению нормы
-- `APP_ALERT_COOLDOWN=PT30M` — защита от повторных звонков по одной и той же строке
-- `APP_TELEPHONY_TARGET_NUMBERS=+79990000000,+79990000001` — номера для обзвона
+- `APP_ALERT_COOLDOWN=PT30M` — защита от повторных тревог по одной и той же строке
+- `APP_ALERT_VOICE_CALL_ENABLED=false` — отправлять только напоминание без автозвонка
+- `APP_TELEPHONY_TARGET_NUMBERS=+79990000000,+79990000001` — номера для обзвона, если позже включите телефонию
 
 ## Проверено
 
@@ -380,6 +512,8 @@ curl -X POST \
   Оркеструет сбор, отправку сообщений и алерты
 - [src/main/java/ru/zhdanov/wbmaxbot/service/MaxUpdateHandler.java](src/main/java/ru/zhdanov/wbmaxbot/service/MaxUpdateHandler.java)
   Обрабатывает команды от MAX
+- [src/main/java/ru/zhdanov/wbmaxbot/telephony/MangoTelephonyProvider.java](src/main/java/ru/zhdanov/wbmaxbot/telephony/MangoTelephonyProvider.java)
+  Callback-вызовы через MANGO OFFICE
 - [src/main/java/ru/zhdanov/wbmaxbot/telephony/TwilioTelephonyProvider.java](src/main/java/ru/zhdanov/wbmaxbot/telephony/TwilioTelephonyProvider.java)
   Голосовые звонки через Twilio
 - [src/main/java/ru/zhdanov/wbmaxbot/telephony/ZadarmaTelephonyProvider.java](src/main/java/ru/zhdanov/wbmaxbot/telephony/ZadarmaTelephonyProvider.java)

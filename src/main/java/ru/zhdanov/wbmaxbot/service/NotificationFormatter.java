@@ -57,11 +57,12 @@ public class NotificationFormatter {
         return messages;
     }
 
-    public String buildAlertMessage(AlertTrigger trigger) {
+    public String buildAlertMessage(AlertTrigger trigger, boolean voiceCallEnabled) {
         ReportRow row = trigger.row();
         return """
                 Тревога WB Last Mile
                 Причина: %s
+                Действие: %s
                                 
                 ЛО: %s
                 Маршрут: %s
@@ -73,6 +74,7 @@ public class NotificationFormatter {
                 Заполнение: %s
                 """.formatted(
                 trigger.reason(),
+                voiceCallEnabled ? "автоматический звонок запущен" : "нужно позвонить вручную",
                 row.loName(),
                 row.route(),
                 row.parking(),
@@ -106,20 +108,22 @@ public class NotificationFormatter {
                                 
                 Важно:
                 бот шлёт периодические отчёты в этот чат,
-                а при срабатывании порога по ШК дополнительно отправляет тревогу и запускает звонок.
+                а при срабатывании порога по ШК дополнительно отправляет тревогу с напоминанием, что нужно позвонить.
                 """.trim();
     }
 
-    public String buildStatusMessage(boolean sessionExists, int activeChats, String mode) {
+    public String buildStatusMessage(boolean sessionExists, int activeChats, String mode, boolean voiceCallEnabled) {
         return """
                 Статус сервиса
                 Режим: %s
                 Файл сессии WB: %s
                 Активных чатов: %d
+                Автозвонок: %s
                 """.formatted(
                 mode,
                 sessionExists ? "готов" : "не найден",
-                activeChats
+                activeChats,
+                voiceCallEnabled ? "включен" : "выключен, только напоминание"
         ).trim();
     }
 

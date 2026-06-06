@@ -39,6 +39,9 @@ app:
   max:
     enabled: false
     base-url: https://platform-api.max.ru
+    long-polling-enabled: true
+    long-polling-timeout: PT30S
+    long-polling-limit: 100
     auto-register-webhook: false
     public-webhook-url:
     token:
@@ -49,9 +52,17 @@ app:
     cooldown: PT30M
     send-report-each-run: true
     max-rows-in-message: 50
+    voice-call-enabled: false
   telephony:
     provider: noop
     target-numbers: []
+    mango:
+      base-url: https://app.mango-office.ru
+      api-key:
+      api-salt:
+      extension:
+      from-number:
+      line-number:
     twilio:
       base-url: https://api.twilio.com/2010-04-01
       account-sid:

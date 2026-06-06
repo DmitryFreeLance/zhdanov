@@ -64,7 +64,12 @@ public class ReportCoordinator {
 
     public String buildStatusMessage() {
         boolean sessionExists = Files.exists(properties.getWildberries().getStorageStatePath().toAbsolutePath());
-        return notificationFormatter.buildStatusMessage(sessionExists, maxMessagingService.activeChatsCount(), properties.getMode());
+        return notificationFormatter.buildStatusMessage(
+                sessionExists,
+                maxMessagingService.activeChatsCount(),
+                properties.getMode(),
+                properties.getAlert().isVoiceCallEnabled()
+        );
     }
 
     private void executeInternal(String source, Long manualChatId) {
@@ -101,9 +106,12 @@ public class ReportCoordinator {
                 continue;
             }
 
-            String alertMessage = notificationFormatter.buildAlertMessage(trigger);
+            boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled();
+            String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled);
             String messageStatus = maxMessagingService.sendToActiveChats(List.of(alertMessage));
-            VoiceCallResult callResult = voiceAlertService.callAllTargets(notificationFormatter.buildVoiceText(trigger));
+            VoiceCallResult callResult = voiceCallEnabled
+                    ? voiceAlertService.callAllTargets(notificationFormatter.buildVoiceText(trigger))
+                    : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
 
             alertEventRepository.save(
                     OffsetDateTime.now(zoneId),
@@ -116,7 +124,7 @@ public class ReportCoordinator {
                     trigger.reason(),
                     mergeStatuses(baseMessageStatus, messageStatus),
                     callResult.provider(),
-                    callResult.success() ? "success" : "failed",
+                    voiceCallEnabled ? (callResult.success() ? "success" : "failed") : "skipped",
                     callResult.externalId(),
                     callResult.details()
             );

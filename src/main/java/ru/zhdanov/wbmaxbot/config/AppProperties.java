@@ -200,6 +200,9 @@ public class AppProperties {
         private boolean enabled;
         @NotBlank
         private String baseUrl = "https://platform-api.max.ru";
+        private boolean longPollingEnabled = true;
+        private Duration longPollingTimeout = Duration.ofSeconds(30);
+        private int longPollingLimit = 100;
         private boolean autoRegisterWebhook;
         private String publicWebhookUrl;
         private String token;
@@ -219,6 +222,30 @@ public class AppProperties {
 
         public void setBaseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
+        }
+
+        public boolean isLongPollingEnabled() {
+            return longPollingEnabled;
+        }
+
+        public void setLongPollingEnabled(boolean longPollingEnabled) {
+            this.longPollingEnabled = longPollingEnabled;
+        }
+
+        public Duration getLongPollingTimeout() {
+            return longPollingTimeout;
+        }
+
+        public void setLongPollingTimeout(Duration longPollingTimeout) {
+            this.longPollingTimeout = longPollingTimeout;
+        }
+
+        public int getLongPollingLimit() {
+            return longPollingLimit;
+        }
+
+        public void setLongPollingLimit(int longPollingLimit) {
+            this.longPollingLimit = longPollingLimit;
         }
 
         public boolean isAutoRegisterWebhook() {
@@ -264,6 +291,7 @@ public class AppProperties {
         private Duration cooldown = Duration.ofMinutes(30);
         private boolean sendReportEachRun = true;
         private int maxRowsInMessage = 50;
+        private boolean voiceCallEnabled = false;
 
         public int getShkThreshold() {
             return shkThreshold;
@@ -304,12 +332,22 @@ public class AppProperties {
         public void setMaxRowsInMessage(int maxRowsInMessage) {
             this.maxRowsInMessage = maxRowsInMessage;
         }
+
+        public boolean isVoiceCallEnabled() {
+            return voiceCallEnabled;
+        }
+
+        public void setVoiceCallEnabled(boolean voiceCallEnabled) {
+            this.voiceCallEnabled = voiceCallEnabled;
+        }
     }
 
     public static class Telephony {
         @NotBlank
         private String provider = "noop";
         private List<String> targetNumbers = new ArrayList<>();
+        @NotNull
+        private Mango mango = new Mango();
         @NotNull
         private Twilio twilio = new Twilio();
         @NotNull
@@ -331,6 +369,14 @@ public class AppProperties {
             this.targetNumbers = targetNumbers;
         }
 
+        public Mango getMango() {
+            return mango;
+        }
+
+        public void setMango(Mango mango) {
+            this.mango = mango;
+        }
+
         public Twilio getTwilio() {
             return twilio;
         }
@@ -345,6 +391,64 @@ public class AppProperties {
 
         public void setZadarma(Zadarma zadarma) {
             this.zadarma = zadarma;
+        }
+    }
+
+    public static class Mango {
+        @NotBlank
+        private String baseUrl = "https://app.mango-office.ru";
+        private String apiKey;
+        private String apiSalt;
+        private String extension;
+        private String fromNumber;
+        private String lineNumber;
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getApiSalt() {
+            return apiSalt;
+        }
+
+        public void setApiSalt(String apiSalt) {
+            this.apiSalt = apiSalt;
+        }
+
+        public String getExtension() {
+            return extension;
+        }
+
+        public void setExtension(String extension) {
+            this.extension = extension;
+        }
+
+        public String getFromNumber() {
+            return fromNumber;
+        }
+
+        public void setFromNumber(String fromNumber) {
+            this.fromNumber = fromNumber;
+        }
+
+        public String getLineNumber() {
+            return lineNumber;
+        }
+
+        public void setLineNumber(String lineNumber) {
+            this.lineNumber = lineNumber;
         }
     }
 
