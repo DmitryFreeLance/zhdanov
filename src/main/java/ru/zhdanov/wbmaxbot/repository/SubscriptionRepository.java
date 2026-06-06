@@ -82,9 +82,10 @@ public class SubscriptionRepository {
     }
 
     private ChatSubscription mapRow(ResultSet rs) throws SQLException {
+        Number userIdValue = (Number) rs.getObject("user_id");
         return new ChatSubscription(
                 rs.getLong("chat_id"),
-                (Long) rs.getObject("user_id"),
+                userIdValue == null ? null : userIdValue.longValue(),
                 rs.getString("title"),
                 rs.getString("chat_type"),
                 rs.getInt("active") == 1,
