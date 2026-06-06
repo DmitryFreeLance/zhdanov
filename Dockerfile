@@ -6,8 +6,6 @@ COPY pom.xml ./
 RUN mvn -q -DskipTests dependency:go-offline
 
 COPY src ./src
-COPY .env.example ./.
-COPY README.md ./README.md
 
 RUN mvn -q -DskipTests package
 
