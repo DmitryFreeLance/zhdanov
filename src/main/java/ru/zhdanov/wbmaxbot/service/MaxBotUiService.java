@@ -1,20 +1,35 @@
 package ru.zhdanov.wbmaxbot.service;
 
 import org.springframework.stereotype.Service;
+import ru.zhdanov.wbmaxbot.config.AppProperties;
 import ru.zhdanov.wbmaxbot.model.ChatSubscription;
+import ru.zhdanov.wbmaxbot.model.ChatLinkedWbAccount;
 import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Map;
 
 @Service
 public class MaxBotUiService {
 
+    private final AppProperties properties;
+
+    public MaxBotUiService(AppProperties properties) {
+        this.properties = properties;
+    }
+
     public MaxOutgoingMessage buildMainMenu(ChatSubscription chat) {
+        return buildMainMenu(chat, 0);
+    }
+
+    public MaxOutgoingMessage buildMainMenu(ChatSubscription chat, int accountCount) {
         String text = """
                 🤖 Панель WB Last Mile
 
+                👤 WB аккаунтов: %s
                 ⏱️ Автоотчёт: %s
                 🚨 Порог ШК: %s
                 📊 Порог заполнения: %s
@@ -23,6 +38,7 @@ public class MaxBotUiService {
 
                 Выберите действие ниже.
                 """.formatted(
+                accountCount,
                 formatInterval(chat),
                 formatShk(chat),
                 formatRatio(chat),
@@ -32,10 +48,44 @@ public class MaxBotUiService {
 
         return withKeyboard(text,
                 row(callback("📄 Отчёт сейчас", "report:now")),
-                row(callback("⏱️ Интервал", "menu:interval"), callback("🚨 Тревога", "menu:alert")),
-                row(callback("📞 Телефон", "menu:phone"), callback(toggleCallLabel(chat), "call:toggle")),
+                row(callback("👤 Аккаунты", "menu:accounts"), callback("⏱️ Интервал", "menu:interval")),
+                row(callback("🚨 Тревога", "menu:alert"), callback("📞 Телефон", "menu:phone")),
+                row(callback(toggleCallLabel(chat), "call:toggle")),
                 row(callback("ℹ️ Статус", "menu:status"), callback("🔄 Обновить", "menu:main"))
         );
+    }
+
+    public MaxOutgoingMessage buildAccountsMenu(ChatSubscription chat, List<ChatLinkedWbAccount> accounts) {
+        StringBuilder text = new StringBuilder("""
+                👤 WB аккаунты
+
+                Подключённые аккаунты:
+                """);
+        if (accounts.isEmpty()) {
+            text.append("\nПока нет ни одного подключённого аккаунта.");
+        } else {
+            for (ChatLinkedWbAccount account : accounts) {
+                text.append("\n")
+                        .append(account.enabled() ? "✅ " : "⏸️ ")
+                        .append(maskPhone(account.phoneNumber()))
+                        .append(" • ")
+                        .append(account.status() == null ? "CONNECTED" : account.status());
+            }
+        }
+
+        List<List<Map<String, Object>>> rows = new ArrayList<>();
+        if (buildMiniAppDeepLink() != null) {
+            rows.add(row(link("🔐 Авторизовать WB", buildMiniAppDeepLink())));
+        }
+        for (ChatLinkedWbAccount account : accounts) {
+            rows.add(row(
+                    callback(account.enabled() ? "⏸️ Пауза " + shortPhone(account.phoneNumber()) : "▶️ Включить " + shortPhone(account.phoneNumber()),
+                            "account:toggle:" + account.accountId()),
+                    callback("🗑 Убрать", "account:unlink:" + account.accountId())
+            ));
+        }
+        rows.add(row(callback("🔙 Назад", "menu:main")));
+        return withKeyboard(text.toString().trim(), rows);
     }
 
     public MaxOutgoingMessage buildIntervalMenu(ChatSubscription chat) {
@@ -196,6 +246,18 @@ public class MaxBotUiService {
                 : "Автоотчёт выключен.";
     }
 
+    public String buildAccountToggleMessage(boolean enabled, String phoneNumber) {
+        return (enabled ? "Аккаунт включён: " : "Аккаунт поставлен на паузу: ") + maskPhone(phoneNumber);
+    }
+
+    public String buildAccountUnlinkedMessage(String phoneNumber) {
+        return "Аккаунт отключён от этого чата: " + maskPhone(phoneNumber);
+    }
+
+    public String buildMiniAppMissingMessage() {
+        return "Для входа в WB нужно привязать mini app к боту и указать APP_MAX_BOT_USERNAME.";
+    }
+
     private String formatInterval(ChatSubscription chat) {
         return chat.autoReportEnabled() ? "каждые " + chat.reportIntervalMinutes() + " минут" : "выключен";
     }
@@ -222,9 +284,13 @@ public class MaxBotUiService {
 
     @SafeVarargs
     private final MaxOutgoingMessage withKeyboard(String text, List<Map<String, Object>>... rows) {
+        return withKeyboard(text, Arrays.asList(rows));
+    }
+
+    private MaxOutgoingMessage withKeyboard(String text, List<List<Map<String, Object>>> rows) {
         return new MaxOutgoingMessage(text, true, List.of(Map.of(
                 "type", "inline_keyboard",
-                "payload", Map.of("buttons", List.of(rows))
+                "payload", Map.of("buttons", rows)
         )));
     }
 
@@ -238,5 +304,37 @@ public class MaxBotUiService {
                 "text", text,
                 "payload", payload
         );
+    }
+
+    private Map<String, Object> link(String text, String url) {
+        return Map.of(
+                "type", "link",
+                "text", text,
+                "url", url
+        );
+    }
+
+    private String buildMiniAppDeepLink() {
+        String botUsername = properties.getMax().getBotUsername();
+        if (botUsername == null || botUsername.isBlank()) {
+            return null;
+        }
+        return "https://max.ru/" + botUsername + "?startapp=wb_auth";
+    }
+
+    private String shortPhone(String phoneNumber) {
+        String masked = maskPhone(phoneNumber);
+        return masked.length() > 8 ? masked.substring(masked.length() - 8) : masked;
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "без номера";
+        }
+        String digits = phoneNumber.replaceAll("[^0-9]", "");
+        if (digits.length() < 4) {
+            return phoneNumber;
+        }
+        return "+" + digits.charAt(0) + "***" + digits.substring(digits.length() - 4);
     }
 }

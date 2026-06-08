@@ -16,6 +16,28 @@ create table if not exists chat_subscription (
     last_seen_at text not null
 );
 
+create table if not exists wb_account (
+    id integer primary key autoincrement,
+    phone_number text not null unique,
+    storage_state_json text not null,
+    status text not null default 'CONNECTED',
+    last_error text,
+    created_at text not null,
+    updated_at text not null,
+    last_authenticated_at text
+);
+
+create table if not exists chat_wb_account (
+    chat_id integer not null,
+    account_id integer not null,
+    enabled integer not null default 1,
+    created_at text not null,
+    updated_at text not null,
+    primary key (chat_id, account_id),
+    foreign key (chat_id) references chat_subscription(chat_id),
+    foreign key (account_id) references wb_account(id)
+);
+
 create table if not exists report_run (
     id integer primary key autoincrement,
     scraped_at text not null,

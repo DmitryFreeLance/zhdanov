@@ -214,6 +214,7 @@ public class AppProperties {
         private int longPollingLimit = 100;
         private boolean autoRegisterWebhook;
         private String publicWebhookUrl;
+        private String botUsername;
         private String token;
         private String webhookSecret;
 
@@ -279,6 +280,14 @@ public class AppProperties {
 
         public void setToken(String token) {
             this.token = token;
+        }
+
+        public String getBotUsername() {
+            return botUsername;
+        }
+
+        public void setBotUsername(String botUsername) {
+            this.botUsername = botUsername;
         }
 
         public String getWebhookSecret() {

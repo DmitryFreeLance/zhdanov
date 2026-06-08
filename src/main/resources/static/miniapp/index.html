@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WB Авторизация</title>
+    <link rel="stylesheet" href="/miniapp/styles.css">
+    <script src="https://st.max.ru/js/max-web-app.js"></script>
+</head>
+<body>
+<main class="app">
+    <section class="card">
+        <h1>WB Logistic</h1>
+        <p class="muted">Подключение и управление аккаунтами Wildberries прямо внутри MAX.</p>
+        <div id="status" class="status">Подключаю mini app…</div>
+    </section>
+
+    <section class="card">
+        <h2>Новый аккаунт WB</h2>
+        <label>
+            Телефон
+            <input id="phoneInput" type="tel" placeholder="+79991234567">
+        </label>
+        <button id="startAuthButton" class="primary">Получить код</button>
+
+        <div id="codeSection" class="hidden">
+            <label>
+                Код из SMS
+                <input id="codeInput" type="text" inputmode="numeric" placeholder="123456">
+            </label>
+            <button id="confirmCodeButton" class="primary">Подтвердить вход</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="row">
+            <h2>Подключённые аккаунты</h2>
+            <button id="refreshButton" class="ghost">Обновить</button>
+        </div>
+        <div id="accounts"></div>
+    </section>
+</main>
+
+<script type="module" src="/miniapp/app.js"></script>
+</body>
+</html>

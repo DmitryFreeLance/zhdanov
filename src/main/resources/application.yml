@@ -45,6 +45,7 @@ app:
     long-polling-limit: 100
     auto-register-webhook: false
     public-webhook-url:
+    bot-username:
     token:
     webhook-secret:
   alert:

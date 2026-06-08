@@ -44,6 +44,28 @@ public class WildberriesScraper {
             throw new IllegalStateException("WB session file not found: " + storageStatePath + ". Run bootstrap mode first.");
         }
 
+        return scrapeReport(storageStatePath);
+    }
+
+    public ScrapeResult scrapeReport(String storageStateJson) {
+        if (storageStateJson == null || storageStateJson.isBlank()) {
+            throw new IllegalStateException("WB session storage state is empty");
+        }
+
+        try {
+            Path tempFile = Files.createTempFile("wb-storage-state-", ".json");
+            Files.writeString(tempFile, storageStateJson);
+            try {
+                return scrapeReport(tempFile);
+            } finally {
+                Files.deleteIfExists(tempFile);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to use WB storage state from database", e);
+        }
+    }
+
+    private ScrapeResult scrapeReport(Path storageStatePath) {
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(defaultLaunchOptions(properties.getWildberries().isHeadless()));
             Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()

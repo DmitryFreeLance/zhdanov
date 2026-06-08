@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import ru.zhdanov.wbmaxbot.config.AppProperties;
 import ru.zhdanov.wbmaxbot.model.AlertTrigger;
 import ru.zhdanov.wbmaxbot.model.ChatSubscription;
+import ru.zhdanov.wbmaxbot.model.ChatLinkedWbAccount;
 import ru.zhdanov.wbmaxbot.model.ReportRow;
 import ru.zhdanov.wbmaxbot.model.ScrapeResult;
 import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
@@ -34,6 +35,7 @@ public class ReportCoordinator {
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
     private final ChatSettingsService chatSettingsService;
+    private final WbAccountService wbAccountService;
     private final ReportRepository reportRepository;
     private final AlertEventRepository alertEventRepository;
     private final ObjectMapper objectMapper;
@@ -45,6 +47,7 @@ public class ReportCoordinator {
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
                              ChatSettingsService chatSettingsService,
+                             WbAccountService wbAccountService,
                              ReportRepository reportRepository,
                              AlertEventRepository alertEventRepository,
                              ObjectMapper objectMapper) {
@@ -54,6 +57,7 @@ public class ReportCoordinator {
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
         this.chatSettingsService = chatSettingsService;
+        this.wbAccountService = wbAccountService;
         this.reportRepository = reportRepository;
         this.alertEventRepository = alertEventRepository;
         this.objectMapper = objectMapper;
@@ -69,7 +73,7 @@ public class ReportCoordinator {
     }
 
     public String buildStatusMessage() {
-        boolean sessionExists = Files.exists(properties.getWildberries().getStorageStatePath().toAbsolutePath());
+        boolean sessionExists = Files.exists(properties.getWildberries().getStorageStatePath().toAbsolutePath()) || hasAnyConnectedAccount();
         return notificationFormatter.buildStatusMessage(
                 sessionExists,
                 maxMessagingService.activeChatsCount(),
@@ -87,16 +91,34 @@ public class ReportCoordinator {
         }
 
         try {
-            ScrapeResult result = wildberriesScraper.scrapeReport();
-            List<String> reportMessages = notificationFormatter.buildReportMessages(result, properties.getAlert().getMaxRowsInMessage());
-            Map<Long, String> messageStatuses = new LinkedHashMap<>();
+            boolean sentAny = false;
+            for (ChatSubscription chat : targetChats) {
+                List<ChatLinkedWbAccount> accounts = wbAccountService.listEnabledAccounts(chat.chatId());
+                if (accounts.isEmpty()) {
+                    if (manualChatId != null) {
+                        maxMessagingService.sendToChat(chat.chatId(), "У этого чата ещё нет подключённых WB аккаунтов. Откройте раздел аккаунтов и авторизуйтесь.");
+                    }
+                    continue;
+                }
 
-            messageStatuses = sendReportMessages(targetChats, reportMessages, manualChatId == null, result.scrapedAt());
+                for (ChatLinkedWbAccount account : accounts) {
+                    ScrapeResult result = wildberriesScraper.scrapeReport(account.storageStateJson());
+                    List<String> reportMessages = notificationFormatter.buildReportMessages(
+                            result,
+                            properties.getAlert().getMaxRowsInMessage(),
+                            maskPhone(account.phoneNumber())
+                    );
+                    Map<String, String> messageStatuses = sendReportMessages(chat, account, reportMessages, manualChatId == null, result.scrapedAt());
+                    long runId = reportRepository.saveSuccessfulRun(result, source, toJson(result.summary()), String.join("\n\n---\n\n", reportMessages));
+                    log.info("Stored report run {} for chat {} and account {}", runId, chat.chatId(), account.accountId());
+                    processAlerts(result, chat, account, messageStatuses);
+                    sentAny = true;
+                }
+            }
 
-            long runId = reportRepository.saveSuccessfulRun(result, source, toJson(result.summary()), String.join("\n\n---\n\n", reportMessages));
-            log.info("Stored report run {}", runId);
-
-            processAlerts(result, targetChats, messageStatuses);
+            if (manualChatId != null && !sentAny) {
+                maxMessagingService.sendToChat(manualChatId, "Не удалось отправить отчёт: нет доступных WB аккаунтов.");
+            }
         } catch (Exception e) {
             log.error("Report execution failed", e);
             reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", e.getMessage());
@@ -106,62 +128,61 @@ public class ReportCoordinator {
         }
     }
 
-    private Map<Long, String> sendReportMessages(List<ChatSubscription> targetChats,
-                                                 List<String> reportMessages,
-                                                 boolean markAsScheduledSend,
-                                                 OffsetDateTime scrapedAt) {
-        Map<Long, String> statuses = new LinkedHashMap<>();
-        for (ChatSubscription chat : targetChats) {
-            String status = "sent=0, failed=0";
-            int successCount = 0;
-            int failureCount = 0;
-            for (String message : reportMessages) {
-                status = maxMessagingService.sendToChat(chat.chatId(), message);
-                if (status.startsWith("sent")) {
-                    successCount++;
-                } else {
-                    failureCount++;
-                }
+    private Map<String, String> sendReportMessages(ChatSubscription chat,
+                                                   ChatLinkedWbAccount account,
+                                                   List<String> reportMessages,
+                                                   boolean markAsScheduledSend,
+                                                   OffsetDateTime scrapedAt) {
+        Map<String, String> statuses = new LinkedHashMap<>();
+        int successCount = 0;
+        int failureCount = 0;
+        for (String message : reportMessages) {
+            String status = maxMessagingService.sendToChat(chat.chatId(), message);
+            if (status.startsWith("sent")) {
+                successCount++;
+            } else {
+                failureCount++;
             }
-            statuses.put(chat.chatId(), "sent=" + successCount + ", failed=" + failureCount);
-            if (markAsScheduledSend && failureCount == 0) {
-                chatSettingsService.markReportSent(chat.chatId(), scrapedAt);
-            }
+        }
+        statuses.put(statusKey(chat.chatId(), account.accountId()), "sent=" + successCount + ", failed=" + failureCount);
+        if (markAsScheduledSend && failureCount == 0) {
+            chatSettingsService.markReportSent(chat.chatId(), scrapedAt);
         }
         return statuses;
     }
 
-    private void processAlerts(ScrapeResult result, List<ChatSubscription> targetChats, Map<Long, String> baseMessageStatuses) {
-        for (ChatSubscription chat : targetChats) {
-            for (AlertTrigger trigger : evaluateTriggers(result, chat)) {
-                String dedupeKey = chat.chatId() + ":" + trigger.dedupeKey();
-                if (isSuppressedByCooldown(dedupeKey)) {
-                    continue;
-                }
-
-                boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled() && chat.callEnabled();
-                String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled);
-                String messageStatus = maxMessagingService.sendToChat(chat.chatId(), alertMessage);
-                VoiceCallResult callResult = voiceCallEnabled
-                        ? voiceAlertService.callTarget(chat.phoneNumber(), notificationFormatter.buildVoiceText(trigger))
-                        : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
-
-                alertEventRepository.save(
-                        OffsetDateTime.now(zoneId),
-                        dedupeKey,
-                        trigger.row().route(),
-                        trigger.row().parking(),
-                        trigger.row().shk(),
-                        trigger.row().norm(),
-                        trigger.row().ratio(),
-                        trigger.reason(),
-                        mergeStatuses(baseMessageStatuses.getOrDefault(chat.chatId(), "not-sent"), messageStatus),
-                        callResult.provider(),
-                        voiceCallEnabled ? (callResult.success() ? "success" : "failed") : "skipped",
-                        callResult.externalId(),
-                        callResult.details()
-                );
+    private void processAlerts(ScrapeResult result,
+                               ChatSubscription chat,
+                               ChatLinkedWbAccount account,
+                               Map<String, String> baseMessageStatuses) {
+        for (AlertTrigger trigger : evaluateTriggers(result, chat)) {
+            String dedupeKey = chat.chatId() + ":" + account.accountId() + ":" + trigger.dedupeKey();
+            if (isSuppressedByCooldown(dedupeKey)) {
+                continue;
             }
+
+            boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled() && chat.callEnabled();
+            String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled, maskPhone(account.phoneNumber()));
+            String messageStatus = maxMessagingService.sendToChat(chat.chatId(), alertMessage);
+            VoiceCallResult callResult = voiceCallEnabled
+                    ? voiceAlertService.callTarget(chat.phoneNumber(), notificationFormatter.buildVoiceText(trigger))
+                    : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+
+            alertEventRepository.save(
+                    OffsetDateTime.now(zoneId),
+                    dedupeKey,
+                    trigger.row().route(),
+                    trigger.row().parking(),
+                    trigger.row().shk(),
+                    trigger.row().norm(),
+                    trigger.row().ratio(),
+                    trigger.reason(),
+                    mergeStatuses(baseMessageStatuses.getOrDefault(statusKey(chat.chatId(), account.accountId()), "not-sent"), messageStatus),
+                    callResult.provider(),
+                    voiceCallEnabled ? (callResult.success() ? "success" : "failed") : "skipped",
+                    callResult.externalId(),
+                    callResult.details()
+            );
         }
     }
 
@@ -191,6 +212,25 @@ public class ReportCoordinator {
 
     private String mergeStatuses(String baseStatus, String alertStatus) {
         return baseStatus + "; alert=" + alertStatus;
+    }
+
+    private String statusKey(long chatId, long accountId) {
+        return chatId + ":" + accountId;
+    }
+
+    private boolean hasAnyConnectedAccount() {
+        return chatSettingsService.activeChats().stream().anyMatch(chat -> !wbAccountService.listEnabledAccounts(chat.chatId()).isEmpty());
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "без номера";
+        }
+        String digits = phoneNumber.replaceAll("[^0-9]", "");
+        if (digits.length() < 4) {
+            return phoneNumber;
+        }
+        return "+" + digits.substring(0, Math.min(1, digits.length())) + "***" + digits.substring(digits.length() - 4);
     }
 
     private String toJson(Object value) {

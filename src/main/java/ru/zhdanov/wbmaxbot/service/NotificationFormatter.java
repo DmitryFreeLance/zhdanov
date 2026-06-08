@@ -17,12 +17,18 @@ public class NotificationFormatter {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
 
     public List<String> buildReportMessages(ScrapeResult result, int maxRowsInMessage) {
+        return buildReportMessages(result, maxRowsInMessage, null);
+    }
+
+    public List<String> buildReportMessages(ScrapeResult result, int maxRowsInMessage, String accountLabel) {
         List<String> messages = new ArrayList<>();
         String header = """
                 Отчёт WB Last Mile
+                %s
                 Время: %s
                                 
                 """.formatted(
+                formatAccountLine(accountLabel),
                 DATE_TIME_FORMATTER.format(result.scrapedAt())
         );
 
@@ -48,9 +54,14 @@ public class NotificationFormatter {
     }
 
     public String buildAlertMessage(AlertTrigger trigger, boolean voiceCallEnabled) {
+        return buildAlertMessage(trigger, voiceCallEnabled, null);
+    }
+
+    public String buildAlertMessage(AlertTrigger trigger, boolean voiceCallEnabled, String accountLabel) {
         ReportRow row = trigger.row();
         return """
                 Тревога WB Last Mile
+                %s
                 Причина: %s
                 Действие: %s
                                 
@@ -60,6 +71,7 @@ public class NotificationFormatter {
                 ШК: %d
                 Норма: %d
                 """.formatted(
+                formatAccountLine(accountLabel),
                 trigger.reason(),
                 voiceCallEnabled ? "автоматический звонок запущен" : "нужно позвонить вручную",
                 resolveParkingEmoji(row.ratio()),
@@ -101,7 +113,7 @@ public class NotificationFormatter {
         return """
                 Статус сервиса
                 Режим: %s
-                Файл сессии WB: %s
+                Сессии WB: %s
                 Активных чатов: %d
                 Автозвонок: %s
                 """.formatted(
@@ -132,6 +144,10 @@ public class NotificationFormatter {
 
     private String formatPercent(double ratio) {
         return String.format(Locale.US, "%.1f%%", ratio * 100.0d);
+    }
+
+    private String formatAccountLine(String accountLabel) {
+        return accountLabel == null || accountLabel.isBlank() ? "" : "Аккаунт: " + accountLabel;
     }
 
     private String resolveParkingEmoji(double ratio) {
