@@ -360,6 +360,9 @@ public class MaxUpdateHandler {
         }
 
         chatSettingsService.startPendingWbAuthCode(chatId, startedAuth.flowId(), startedAuth.normalizedPhone());
+        if (startedAuth.message() != null && !startedAuth.message().isBlank()) {
+            maxMessagingService.sendToChat(chatId, "WB: " + startedAuth.message());
+        }
         maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartedMessage(startedAuth.normalizedPhone()));
         maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthCodePrompt(startedAuth.normalizedPhone()));
     }

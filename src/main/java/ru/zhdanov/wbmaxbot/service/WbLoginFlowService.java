@@ -75,11 +75,12 @@ public class WbLoginFlowService {
             fillPhoneAndRequestCode(page, normalizedPhone);
             log.info("WB phone submitted for {}", maskPhone(normalizedPhone));
             waitForCodeUi(page, properties.getWildberries().getTimeout());
-            log.info("WB code input detected for {}", maskPhone(normalizedPhone));
+            String codeScreenHint = extractCodeScreenHint(page);
+            log.info("WB code input detected for {}. Hint: {}", maskPhone(normalizedPhone), codeScreenHint);
 
             String flowId = UUID.randomUUID().toString();
             pendingFlows.put(flowId, new PendingFlow(playwright, browser, context, page, normalizedPhone, OffsetDateTime.now(zoneId).plus(FLOW_TTL)));
-            return new StartedAuth(flowId, normalizedPhone, "Введите код из SMS и нажмите Подтвердить");
+            return new StartedAuth(flowId, normalizedPhone, codeScreenHint);
         } catch (Exception e) {
             log.warn("WB auth start failed for {}: {}", maskPhone(normalizedPhone), e.getMessage());
             throw new IllegalStateException("Не удалось начать авторизацию WB: " + e.getMessage(), e);
@@ -233,7 +234,7 @@ public class WbLoginFlowService {
             }
             page.waitForTimeout(1000);
         }
-        throw new IllegalStateException("Не удалось дождаться поля ввода кода WB. URL: " + page.url());
+        throw new IllegalStateException("Не удалось дождаться поля ввода кода WB. URL: " + page.url() + ". Экран: " + extractCodeScreenHint(page));
     }
 
     private void submitCode(Page page, String code) {
@@ -328,6 +329,54 @@ public class WbLoginFlowService {
             return "unknown";
         }
         return "+" + digits.charAt(0) + "***" + digits.substring(digits.length() - 4);
+    }
+
+    private String extractCodeScreenHint(Page page) {
+        try {
+            String bodyText = page.locator("body").innerText();
+            if (bodyText == null || bodyText.isBlank()) {
+                return "WB открыл экран ввода кода.";
+            }
+
+            String normalized = bodyText
+                    .replace('\u00A0', ' ')
+                    .replaceAll("[ \\t\\x0B\\f\\r]+", " ")
+                    .replaceAll("\\n{2,}", "\n")
+                    .trim();
+
+            String[] lines = normalized.split("\\n");
+            StringBuilder selected = new StringBuilder();
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.isBlank()) {
+                    continue;
+                }
+                String lower = trimmed.toLowerCase();
+                if (lower.contains("код")
+                        || lower.contains("sms")
+                        || lower.contains("смс")
+                        || lower.contains("отправ")
+                        || lower.contains("повтор")
+                        || lower.contains("подтверд")
+                        || lower.contains("номер")) {
+                    if (!selected.isEmpty()) {
+                        selected.append(" | ");
+                    }
+                    selected.append(trimmed);
+                    if (selected.length() >= 220) {
+                        break;
+                    }
+                }
+            }
+
+            String result = selected.isEmpty() ? normalized : selected.toString();
+            if (result.length() > 240) {
+                result = result.substring(0, 240) + "...";
+            }
+            return result;
+        } catch (Exception e) {
+            return "WB открыл экран ввода кода.";
+        }
     }
 
     public record StartedAuth(String flowId, String normalizedPhone, String message) {
