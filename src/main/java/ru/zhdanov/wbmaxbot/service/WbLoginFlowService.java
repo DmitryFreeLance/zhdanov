@@ -3,9 +3,13 @@ package ru.zhdanov.wbmaxbot.service;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.WaitUntilState;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import ru.zhdanov.wbmaxbot.config.AppProperties;
@@ -19,25 +23,39 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class WbLoginFlowService {
 
+    private static final Logger log = LoggerFactory.getLogger(WbLoginFlowService.class);
     private static final String LOGIN_URL = "https://logistics.wildberries.ru/auth/login";
     private static final Duration FLOW_TTL = Duration.ofMinutes(10);
 
     private final AppProperties properties;
     private final ZoneId zoneId;
     private final Map<String, PendingFlow> pendingFlows = new ConcurrentHashMap<>();
+    private final ExecutorService authExecutor = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "wb-auth-flow");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public WbLoginFlowService(AppProperties properties) {
         this.properties = properties;
         this.zoneId = ZoneId.of(properties.getZoneId());
     }
 
+    public CompletableFuture<StartedAuth> startAsync(String phoneNumber) {
+        return CompletableFuture.supplyAsync(() -> start(phoneNumber), authExecutor);
+    }
+
     public StartedAuth start(String phoneNumber) {
         String normalizedPhone = normalizePhone(phoneNumber);
+        log.info("Starting WB auth flow for {}", maskPhone(normalizedPhone));
 
         try {
             Playwright playwright = Playwright.create();
@@ -51,15 +69,19 @@ public class WbLoginFlowService {
                     new Page.NavigateOptions()
                             .setTimeout(timeoutMs())
                             .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+            log.info("WB auth page opened for {}", maskPhone(normalizedPhone));
 
             waitForLoginUi(page, properties.getWildberries().getTimeout());
             fillPhoneAndRequestCode(page, normalizedPhone);
+            log.info("WB phone submitted for {}", maskPhone(normalizedPhone));
             waitForCodeUi(page, properties.getWildberries().getTimeout());
+            log.info("WB code input detected for {}", maskPhone(normalizedPhone));
 
             String flowId = UUID.randomUUID().toString();
             pendingFlows.put(flowId, new PendingFlow(playwright, browser, context, page, normalizedPhone, OffsetDateTime.now(zoneId).plus(FLOW_TTL)));
             return new StartedAuth(flowId, normalizedPhone, "Введите код из SMS и нажмите Подтвердить");
         } catch (Exception e) {
+            log.warn("WB auth start failed for {}: {}", maskPhone(normalizedPhone), e.getMessage());
             throw new IllegalStateException("Не удалось начать авторизацию WB: " + e.getMessage(), e);
         }
     }
@@ -93,6 +115,11 @@ public class WbLoginFlowService {
             return;
         }
         closeFlow(flowId);
+    }
+
+    @PreDestroy
+    public void shutdownExecutor() {
+        authExecutor.shutdownNow();
     }
 
     @Scheduled(fixedDelay = 60000)
@@ -167,8 +194,11 @@ public class WbLoginFlowService {
     }
 
     private void fillPhoneAndRequestCode(Page page, String phoneNumber) {
-        first(page, "input[type='tel'], input[inputmode='tel'], input[name*='phone' i], input[autocomplete='tel'], input[placeholder*='тел' i]")
-                .fill(phoneNumber);
+        Locator phoneInput = first(page, "input[type='tel'], input[inputmode='tel'], input[name*='phone' i], input[autocomplete='tel'], input[placeholder*='тел' i]");
+        phoneInput.click();
+        phoneInput.fill("");
+        phoneInput.type(phoneNumber, new Locator.TypeOptions().setDelay(80));
+        page.waitForTimeout(300);
         clickFirst(page,
                 "button:has-text('Получить код')",
                 "button:has-text('Продолжить')",
@@ -186,7 +216,7 @@ public class WbLoginFlowService {
             }
             page.waitForTimeout(1000);
         }
-        throw new IllegalStateException("Не удалось дождаться поля ввода кода WB");
+        throw new IllegalStateException("Не удалось дождаться поля ввода кода WB. URL: " + page.url());
     }
 
     private void submitCode(Page page, String code) {
@@ -264,15 +294,23 @@ public class WbLoginFlowService {
     private String normalizePhone(String phoneNumber) {
         String digits = phoneNumber == null ? "" : phoneNumber.replaceAll("[^0-9]", "");
         if (digits.length() == 10) {
-            return "7" + digits;
+            return "+7" + digits;
         }
         if (digits.length() == 11 && digits.startsWith("8")) {
-            return "7" + digits.substring(1);
+            return "+7" + digits.substring(1);
         }
         if (digits.length() == 11 && digits.startsWith("7")) {
-            return digits;
+            return "+" + digits;
         }
         throw new IllegalArgumentException("Введите номер WB в формате +79991234567");
+    }
+
+    private String maskPhone(String phoneNumber) {
+        String digits = phoneNumber == null ? "" : phoneNumber.replaceAll("[^0-9]", "");
+        if (digits.length() < 4) {
+            return "unknown";
+        }
+        return "+" + digits.charAt(0) + "***" + digits.substring(digits.length() - 4);
     }
 
     public record StartedAuth(String flowId, String normalizedPhone, String message) {

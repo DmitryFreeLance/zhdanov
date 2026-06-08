@@ -289,6 +289,14 @@ public class MaxBotUiService {
         return "Запросил код WB для номера " + maskPhone(phoneNumber) + ".";
     }
 
+    public String buildWbAuthStartingMessage(String phoneNumber) {
+        return "Запускаю вход в WB для " + maskPhone(phoneNumber) + ". Это может занять до минуты.";
+    }
+
+    public String buildWbAuthStillStartingMessage() {
+        return "Ещё запрашиваю код WB. Подождите немного или нажмите Отменить.";
+    }
+
     public String buildWbAuthSuccessMessage(String phoneNumber) {
         return "WB аккаунт подключён: " + maskPhone(phoneNumber);
     }

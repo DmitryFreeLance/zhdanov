@@ -10,6 +10,7 @@ import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
 
 import java.nio.file.Files;
 import java.util.Locale;
+import java.util.concurrent.CompletionException;
 
 @Service
 public class MaxUpdateHandler {
@@ -219,11 +220,13 @@ public class MaxUpdateHandler {
                 }
                 case ChatSettingsService.PENDING_WB_AUTH_PHONE -> {
                     String phone = normalizePhoneNumber(rawText);
-                    WbLoginFlowService.StartedAuth startedAuth = wbLoginFlowService.start(phone);
-                    chatSettingsService.startPendingWbAuthCode(chatId, startedAuth.flowId(), startedAuth.normalizedPhone());
-                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartedMessage(startedAuth.normalizedPhone()));
-                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthCodePrompt(startedAuth.normalizedPhone()));
+                    chatSettingsService.startPendingWbAuthStarting(chatId, phone);
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartingMessage(phone));
+                    wbLoginFlowService.startAsync(phone)
+                            .whenComplete((startedAuth, error) -> handleStartedWbAuth(chatId, phone, startedAuth, error));
                 }
+                case ChatSettingsService.PENDING_WB_AUTH_STARTING ->
+                        maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStillStartingMessage());
                 case ChatSettingsService.PENDING_WB_AUTH_CODE -> confirmWbAuthCode(chat, rawText);
                 default -> {
                     chatSettingsService.clearPendingInputState(chatId);
@@ -291,6 +294,34 @@ public class MaxUpdateHandler {
                 maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
     }
 
+    private void handleStartedWbAuth(long chatId,
+                                     String requestedPhone,
+                                     WbLoginFlowService.StartedAuth startedAuth,
+                                     Throwable error) {
+        ChatSubscription latestChat = chatSettingsService.getRequired(chatId);
+        boolean stillWaitingForStart = ChatSettingsService.PENDING_WB_AUTH_STARTING.equals(latestChat.pendingInputState())
+                && requestedPhone.equals(latestChat.pendingWbAuthPhoneNumber());
+
+        if (error != null) {
+            if (stillWaitingForStart) {
+                chatSettingsService.clearPendingWbAuth(chatId);
+                maxMessagingService.sendToChat(chatId, unwrapCompletionError(error).getMessage());
+                maxMessagingService.sendToChat(chatId,
+                        maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+            }
+            return;
+        }
+
+        if (!stillWaitingForStart) {
+            wbLoginFlowService.cancel(startedAuth.flowId());
+            return;
+        }
+
+        chatSettingsService.startPendingWbAuthCode(chatId, startedAuth.flowId(), startedAuth.normalizedPhone());
+        maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartedMessage(startedAuth.normalizedPhone()));
+        maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthCodePrompt(startedAuth.normalizedPhone()));
+    }
+
     private void toggleAccount(long chatId, String callbackId, long accountId) {
         ChatLinkedWbAccount account = wbAccountService.listAccounts(chatId).stream()
                 .filter(item -> item.accountId() == accountId)
@@ -331,6 +362,7 @@ public class MaxUpdateHandler {
         }
 
         if (ChatSettingsService.PENDING_WB_AUTH_PHONE.equals(chat.pendingInputState())
+                || ChatSettingsService.PENDING_WB_AUTH_STARTING.equals(chat.pendingInputState())
                 || ChatSettingsService.PENDING_WB_AUTH_CODE.equals(chat.pendingInputState())) {
             wbLoginFlowService.cancel(chat.pendingWbAuthFlowId());
             chatSettingsService.clearPendingWbAuth(chat.chatId());
@@ -478,5 +510,16 @@ public class MaxUpdateHandler {
             return update.path("sender").path("user_id").asLong();
         }
         return null;
+    }
+
+    private RuntimeException unwrapCompletionError(Throwable error) {
+        Throwable current = error;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        if (current instanceof RuntimeException runtimeException) {
+            return runtimeException;
+        }
+        return new IllegalStateException(current == null ? "Ошибка авторизации WB" : current.getMessage(), current);
     }
 }

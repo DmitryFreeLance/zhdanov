@@ -16,6 +16,7 @@ public class ChatSettingsService {
     public static final String PENDING_SHK_THRESHOLD = "shk-threshold";
     public static final String PENDING_RATIO_THRESHOLD = "ratio-threshold";
     public static final String PENDING_WB_AUTH_PHONE = "wb-auth-phone";
+    public static final String PENDING_WB_AUTH_STARTING = "wb-auth-starting";
     public static final String PENDING_WB_AUTH_CODE = "wb-auth-code";
 
     private final SubscriptionRepository subscriptionRepository;
@@ -85,6 +86,10 @@ public class ChatSettingsService {
 
     public void startPendingWbAuthPhone(long chatId) {
         subscriptionRepository.updatePendingWbAuth(chatId, PENDING_WB_AUTH_PHONE, null, null);
+    }
+
+    public void startPendingWbAuthStarting(long chatId, String phoneNumber) {
+        subscriptionRepository.updatePendingWbAuth(chatId, PENDING_WB_AUTH_STARTING, null, phoneNumber);
     }
 
     public void startPendingWbAuthCode(long chatId, String flowId, String phoneNumber) {
