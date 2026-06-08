@@ -16,6 +16,8 @@ import java.util.concurrent.CompletionException;
 public class MaxUpdateHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MaxUpdateHandler.class);
+    private static final long ADMIN_USER_ID = 188421258L;
+    private static final String ACCESS_DENIED_MESSAGE = "Доступ к боту закрыт. Разрешён только администратор.";
 
     private final MaxMessagingService maxMessagingService;
     private final ReportCoordinator reportCoordinator;
@@ -48,12 +50,28 @@ public class MaxUpdateHandler {
 
         switch (updateType) {
             case "bot_started" -> {
+                if (!isAdminUser(userId)) {
+                    denyMessageAccess(chatId, userId, "bot_started");
+                    return;
+                }
                 maxMessagingService.subscribe(chatId, userId, extractTitle(update), extractChatType(update));
                 maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
             }
             case "bot_stopped", "bot_removed", "dialog_removed" -> maxMessagingService.deactivate(chatId);
-            case "message_created" -> handleMessage(chatId, userId, extractTitle(update), extractChatType(update), extractText(update));
-            case "message_callback" -> handleCallback(chatId, extractCallbackId(update), extractCallbackPayload(update));
+            case "message_created" -> {
+                if (!isAdminUser(userId)) {
+                    denyMessageAccess(chatId, userId, "message_created");
+                    return;
+                }
+                handleMessage(chatId, userId, extractTitle(update), extractChatType(update), extractText(update));
+            }
+            case "message_callback" -> {
+                if (!isAdminUser(userId)) {
+                    denyCallbackAccess(chatId, userId, extractCallbackId(update));
+                    return;
+                }
+                handleCallback(chatId, extractCallbackId(update), extractCallbackPayload(update));
+            }
             default -> log.debug("Ignoring MAX update type {}", updateType);
         }
     }
@@ -500,6 +518,12 @@ public class MaxUpdateHandler {
     }
 
     private Long extractUserId(JsonNode update) {
+        if (update.path("callback").path("user").hasNonNull("user_id")) {
+            return update.path("callback").path("user").path("user_id").asLong();
+        }
+        if (update.path("callback").path("sender").hasNonNull("user_id")) {
+            return update.path("callback").path("sender").path("user_id").asLong();
+        }
         if (update.path("user").hasNonNull("user_id")) {
             return update.path("user").path("user_id").asLong();
         }
@@ -510,6 +534,22 @@ public class MaxUpdateHandler {
             return update.path("sender").path("user_id").asLong();
         }
         return null;
+    }
+
+    private boolean isAdminUser(Long userId) {
+        return userId != null && userId == ADMIN_USER_ID;
+    }
+
+    private void denyMessageAccess(long chatId, Long userId, String updateType) {
+        log.warn("Denied MAX access for user {} in chat {} on {}", userId, chatId, updateType);
+        if (chatId > 0) {
+            maxMessagingService.sendToChat(chatId, ACCESS_DENIED_MESSAGE);
+        }
+    }
+
+    private void denyCallbackAccess(long chatId, Long userId, String callbackId) {
+        log.warn("Denied MAX callback access for user {} in chat {}", userId, chatId);
+        maxMessagingService.answerCallback(chatId, callbackId, ACCESS_DENIED_MESSAGE, null);
     }
 
     private RuntimeException unwrapCompletionError(Throwable error) {
