@@ -21,19 +21,9 @@ public class NotificationFormatter {
         String header = """
                 Отчёт WB Last Mile
                 Время: %s
-                Строк: %d
-                ШК всего: %d
-                Коробки всего: %d
-                КГТ всего: %d
-                Объём: %.2f л
                                 
                 """.formatted(
-                DATE_TIME_FORMATTER.format(result.scrapedAt()),
-                result.summary().rowsCount(),
-                result.summary().totalShk(),
-                result.summary().totalBoxes(),
-                result.summary().totalKgt(),
-                result.summary().totalVolumeLiters()
+                DATE_TIME_FORMATTER.format(result.scrapedAt())
         );
 
         StringBuilder current = new StringBuilder(header);
@@ -64,25 +54,20 @@ public class NotificationFormatter {
                 Причина: %s
                 Действие: %s
                                 
-                ЛО: %s
-                Маршрут: %s
-                Парковка: %s
+                %s Парковка %s
                 Коробки: %d
                 КГТ: %d
                 ШК: %d
                 Норма: %d
-                Заполнение: %s
                 """.formatted(
                 trigger.reason(),
                 voiceCallEnabled ? "автоматический звонок запущен" : "нужно позвонить вручную",
-                row.loName(),
-                row.route(),
+                resolveParkingEmoji(row.ratio()),
                 row.parking(),
                 row.boxes(),
                 row.kgt(),
                 row.shk(),
-                row.norm(),
-                formatPercent(row.ratio())
+                row.norm()
         ).trim();
     }
 
@@ -129,28 +114,36 @@ public class NotificationFormatter {
 
     private String formatRowBlock(ReportRow row) {
         return """
-                ЛО: %s
-                Маршрут: %s
-                Парковка: %s
+                %s Парковка %s
                 Коробки: %d
                 КГТ: %d
                 ШК: %d
                 Норма: %d
-                Заполнение: %s
                                 
                 """.formatted(
-                row.loName(),
-                row.route(),
+                resolveParkingEmoji(row.ratio()),
                 row.parking(),
                 row.boxes(),
                 row.kgt(),
                 row.shk(),
-                row.norm(),
-                formatPercent(row.ratio())
+                row.norm()
         );
     }
 
     private String formatPercent(double ratio) {
         return String.format(Locale.US, "%.1f%%", ratio * 100.0d);
+    }
+
+    private String resolveParkingEmoji(double ratio) {
+        if (ratio >= 0.8d) {
+            return "🔴";
+        }
+        if (ratio >= 0.7d) {
+            return "🟠";
+        }
+        if (ratio >= 0.6d) {
+            return "🟡";
+        }
+        return "🟢";
     }
 }

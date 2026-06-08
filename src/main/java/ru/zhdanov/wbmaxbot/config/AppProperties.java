@@ -295,7 +295,7 @@ public class AppProperties {
 
         @DecimalMin("0.0")
         @DecimalMax("1.0")
-        private double ratioThreshold = 0.9d;
+        private double ratioThreshold = 0.8d;
 
         private Duration cooldown = Duration.ofMinutes(30);
         private boolean sendReportEachRun = true;

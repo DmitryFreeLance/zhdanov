@@ -29,7 +29,12 @@ public class SchemaMigrationRunner {
         addColumnIfMissing(columns, "report_interval_minutes", "alter table chat_subscription add column report_interval_minutes integer not null default 15");
         addColumnIfMissing(columns, "last_report_sent_at", "alter table chat_subscription add column last_report_sent_at text");
         addColumnIfMissing(columns, "shk_threshold", "alter table chat_subscription add column shk_threshold integer default 1200");
-        addColumnIfMissing(columns, "ratio_threshold", "alter table chat_subscription add column ratio_threshold real default 0.9");
+        addColumnIfMissing(columns, "ratio_threshold", "alter table chat_subscription add column ratio_threshold real default 0.8");
+        jdbcTemplate.update("""
+                update chat_subscription
+                set ratio_threshold = 0.8
+                where ratio_threshold = 0.9
+                """);
         addColumnIfMissing(columns, "call_enabled", "alter table chat_subscription add column call_enabled integer not null default 0");
         addColumnIfMissing(columns, "phone_number", "alter table chat_subscription add column phone_number text");
         addColumnIfMissing(columns, "pending_input_state", "alter table chat_subscription add column pending_input_state text");

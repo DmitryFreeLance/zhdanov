@@ -8,7 +8,7 @@ create table if not exists chat_subscription (
     report_interval_minutes integer not null default 15,
     last_report_sent_at text,
     shk_threshold integer default 1200,
-    ratio_threshold real default 0.9,
+    ratio_threshold real default 0.8,
     call_enabled integer not null default 0,
     phone_number text,
     pending_input_state text,

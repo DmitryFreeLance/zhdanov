@@ -49,7 +49,7 @@ app:
     webhook-secret:
   alert:
     shk-threshold: 1200
-    ratio-threshold: 0.9
+    ratio-threshold: 0.8
     cooldown: PT30M
     send-report-each-run: true
     max-rows-in-message: 50
