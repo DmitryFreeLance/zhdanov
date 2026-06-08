@@ -74,9 +74,7 @@ public class MaxBotUiService {
         }
 
         List<List<Map<String, Object>>> rows = new ArrayList<>();
-        if (buildMiniAppDeepLink() != null) {
-            rows.add(row(link("🔐 Авторизовать WB", buildMiniAppDeepLink())));
-        }
+        rows.add(row(callback("🔐 Авторизовать WB", "wb:auth:start")));
         for (ChatLinkedWbAccount account : accounts) {
             rows.add(row(
                     callback(account.enabled() ? "⏸️ Пауза " + shortPhone(account.phoneNumber()) : "▶️ Включить " + shortPhone(account.phoneNumber()),
@@ -254,8 +252,45 @@ public class MaxBotUiService {
         return "Аккаунт отключён от этого чата: " + maskPhone(phoneNumber);
     }
 
-    public String buildMiniAppMissingMessage() {
-        return "Для входа в WB нужно привязать mini app к боту и указать APP_MAX_BOT_USERNAME.";
+    public MaxOutgoingMessage buildWbAuthPhonePrompt() {
+        return withKeyboard("""
+                🔐 Подключение WB
+
+                Отправьте номер телефона аккаунта WB.
+
+                Примеры:
+                +79991234567
+                89991234567
+
+                Для отмены нажмите кнопку ниже.
+                """.trim(),
+                row(callback("❌ Отменить", "wb:auth:cancel"))
+        );
+    }
+
+    public MaxOutgoingMessage buildWbAuthCodePrompt(String phoneNumber) {
+        return withKeyboard("""
+                🔐 Код WB отправлен
+
+                Номер: %s
+
+                Теперь отправьте код из SMS одним сообщением.
+                Для отмены нажмите кнопку ниже.
+                """.formatted(maskPhone(phoneNumber)).trim(),
+                row(callback("❌ Отменить", "wb:auth:cancel"))
+        );
+    }
+
+    public String buildWbAuthCancelledMessage() {
+        return "Авторизация WB отменена.";
+    }
+
+    public String buildWbAuthStartedMessage(String phoneNumber) {
+        return "Запросил код WB для номера " + maskPhone(phoneNumber) + ".";
+    }
+
+    public String buildWbAuthSuccessMessage(String phoneNumber) {
+        return "WB аккаунт подключён: " + maskPhone(phoneNumber);
     }
 
     private String formatInterval(ChatSubscription chat) {

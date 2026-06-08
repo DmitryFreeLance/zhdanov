@@ -16,6 +16,8 @@ public record ChatSubscription(
         boolean callEnabled,
         String phoneNumber,
         String pendingInputState,
+        String pendingWbAuthFlowId,
+        String pendingWbAuthPhoneNumber,
         OffsetDateTime createdAt,
         OffsetDateTime lastSeenAt
 ) {

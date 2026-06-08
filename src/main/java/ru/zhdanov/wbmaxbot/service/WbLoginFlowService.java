@@ -66,20 +66,33 @@ public class WbLoginFlowService {
 
     public String confirm(String flowId, String code) {
         PendingFlow flow = getRequired(flowId);
+        Path tempFile = null;
         try {
             submitCode(flow.page(), code);
             waitForAuthorizedPage(flow.page(), properties.getWildberries().getBootstrapTimeout());
-            Path tempFile = Files.createTempFile("wb-auth-storage-", ".json");
-            try {
-                flow.context().storageState(new BrowserContext.StorageStateOptions().setPath(tempFile));
-                return Files.readString(tempFile);
-            } finally {
-                Files.deleteIfExists(tempFile);
-                closeFlow(flowId);
-            }
+            tempFile = Files.createTempFile("wb-auth-storage-", ".json");
+            flow.context().storageState(new BrowserContext.StorageStateOptions().setPath(tempFile));
+            return Files.readString(tempFile);
         } catch (Exception e) {
             throw new IllegalStateException("Не удалось подтвердить код WB: " + e.getMessage(), e);
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException ignored) {
+                }
+            }
+            if (flowId != null && pendingFlows.containsKey(flowId)) {
+                closeFlow(flowId);
+            }
         }
+    }
+
+    public void cancel(String flowId) {
+        if (flowId == null || flowId.isBlank()) {
+            return;
+        }
+        closeFlow(flowId);
     }
 
     @Scheduled(fixedDelay = 60000)

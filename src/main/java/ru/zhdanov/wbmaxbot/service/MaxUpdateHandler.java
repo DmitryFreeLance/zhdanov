@@ -20,6 +20,7 @@ public class MaxUpdateHandler {
     private final ReportCoordinator reportCoordinator;
     private final ChatSettingsService chatSettingsService;
     private final WbAccountService wbAccountService;
+    private final WbLoginFlowService wbLoginFlowService;
     private final MaxBotUiService maxBotUiService;
     private final ru.zhdanov.wbmaxbot.config.AppProperties properties;
 
@@ -27,12 +28,14 @@ public class MaxUpdateHandler {
                             ReportCoordinator reportCoordinator,
                             ChatSettingsService chatSettingsService,
                             WbAccountService wbAccountService,
+                            WbLoginFlowService wbLoginFlowService,
                             MaxBotUiService maxBotUiService,
                             ru.zhdanov.wbmaxbot.config.AppProperties properties) {
         this.maxMessagingService = maxMessagingService;
         this.reportCoordinator = reportCoordinator;
         this.chatSettingsService = chatSettingsService;
         this.wbAccountService = wbAccountService;
+        this.wbLoginFlowService = wbLoginFlowService;
         this.maxBotUiService = maxBotUiService;
         this.properties = properties;
     }
@@ -79,16 +82,26 @@ public class MaxUpdateHandler {
 
         switch (command) {
             case "/start", "/help", "/subscribe" -> {
-                chatSettingsService.clearPendingInputState(chatId);
+                cancelPendingInput(chat);
                 maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
             }
             case "/unsubscribe" -> {
+                cancelPendingInput(chat);
                 maxMessagingService.deactivate(chatId);
                 maxMessagingService.sendToChat(chatId, "Сообщения для этого чата отключены.");
             }
-            case "/status" -> maxMessagingService.sendToChat(chatId, buildStatusMenu(chatId));
-            case "/report" -> reportCoordinator.executeManualRun(chatId);
-            case "/menu" -> maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
+            case "/status" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.sendToChat(chatId, buildStatusMenu(chatId));
+            }
+            case "/report" -> {
+                cancelPendingInput(chat);
+                reportCoordinator.executeManualRun(chatId);
+            }
+            case "/menu" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
+            }
             default -> maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
         }
     }
@@ -101,6 +114,8 @@ public class MaxUpdateHandler {
         }
 
         ChatSubscription chat = chatSettingsService.getRequired(chatId);
+        cancelPendingInput(chat);
+        chat = chatSettingsService.getRequired(chatId);
         if (payload.startsWith("account:toggle:")) {
             long accountId = parseAccountId(payload, "account:toggle:");
             toggleAccount(chatId, callbackId, accountId);
@@ -113,14 +128,33 @@ public class MaxUpdateHandler {
         }
 
         switch (payload) {
-            case "menu:main" -> maxMessagingService.answerCallback(chatId, callbackId, null, buildMainMenu(chatId));
-            case "menu:accounts" -> maxMessagingService.answerCallback(chatId, callbackId, null,
-                    maxBotUiService.buildAccountsMenu(chat, wbAccountService.listAccounts(chatId)));
-            case "menu:interval" -> maxMessagingService.answerCallback(chatId, callbackId, null, maxBotUiService.buildIntervalMenu(chat));
-            case "menu:alert" -> maxMessagingService.answerCallback(chatId, callbackId, null, maxBotUiService.buildAlertMenu(chat));
-            case "menu:phone" -> maxMessagingService.answerCallback(chatId, callbackId, null, maxBotUiService.buildPhoneMenu(chat));
-            case "menu:status" -> maxMessagingService.answerCallback(chatId, callbackId, "Статус обновлён", buildStatusMenu(chatId));
+            case "menu:main" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.answerCallback(chatId, callbackId, null, buildMainMenu(chatId));
+            }
+            case "menu:accounts" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.answerCallback(chatId, callbackId, null,
+                        maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+            }
+            case "menu:interval" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.answerCallback(chatId, callbackId, null, maxBotUiService.buildIntervalMenu(chatSettingsService.getRequired(chatId)));
+            }
+            case "menu:alert" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.answerCallback(chatId, callbackId, null, maxBotUiService.buildAlertMenu(chatSettingsService.getRequired(chatId)));
+            }
+            case "menu:phone" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.answerCallback(chatId, callbackId, null, maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
+            }
+            case "menu:status" -> {
+                cancelPendingInput(chat);
+                maxMessagingService.answerCallback(chatId, callbackId, "Статус обновлён", buildStatusMenu(chatId));
+            }
             case "report:now" -> {
+                cancelPendingInput(chat);
                 maxMessagingService.answerCallback(chatId, callbackId, "Формирую отчёт...", buildMainMenu(chatId));
                 reportCoordinator.executeManualRun(chatId);
             }
@@ -145,12 +179,15 @@ public class MaxUpdateHandler {
                 maxMessagingService.answerCallback(chatId, callbackId, "Жду процент заполнения", maxBotUiService.buildRatioPrompt());
             }
             case "phone:clear" -> {
+                cancelPendingInput(chat);
                 chatSettingsService.setPhoneNumber(chatId, null);
                 chatSettingsService.setCallEnabled(chatId, false);
                 maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildPhoneClearedMessage(),
                         maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
             }
             case "call:toggle" -> toggleCall(chatId, callbackId, chat);
+            case "wb:auth:start" -> startWbAuth(chatId, callbackId, chat);
+            case "wb:auth:cancel" -> cancelWbAuth(chatId, callbackId, chat);
             default -> maxMessagingService.answerCallback(chatId, callbackId, "Неизвестное действие", buildMainMenu(chatId));
         }
     }
@@ -180,13 +217,21 @@ public class MaxUpdateHandler {
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildRatioSavedMessage(threshold));
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildAlertMenu(chatSettingsService.getRequired(chatId)));
                 }
+                case ChatSettingsService.PENDING_WB_AUTH_PHONE -> {
+                    String phone = normalizePhoneNumber(rawText);
+                    WbLoginFlowService.StartedAuth startedAuth = wbLoginFlowService.start(phone);
+                    chatSettingsService.startPendingWbAuthCode(chatId, startedAuth.flowId(), startedAuth.normalizedPhone());
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartedMessage(startedAuth.normalizedPhone()));
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthCodePrompt(startedAuth.normalizedPhone()));
+                }
+                case ChatSettingsService.PENDING_WB_AUTH_CODE -> confirmWbAuthCode(chat, rawText);
                 default -> {
                     chatSettingsService.clearPendingInputState(chatId);
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildUnknownInputMessage());
                     maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
                 }
             }
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
             maxMessagingService.sendToChat(chatId, e.getMessage());
         }
     }
@@ -208,6 +253,42 @@ public class MaxUpdateHandler {
         ChatSubscription updatedChat = chatSettingsService.getRequired(chatId);
         maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildCallToggleMessage(updatedChat.callEnabled()),
                 maxBotUiService.buildPhoneMenu(updatedChat));
+    }
+
+    private void startWbAuth(long chatId, String callbackId, ChatSubscription chat) {
+        cancelPendingInput(chat);
+        chatSettingsService.startPendingWbAuthPhone(chatId);
+        maxMessagingService.answerCallback(chatId, callbackId, "Жду номер WB", maxBotUiService.buildWbAuthPhonePrompt());
+    }
+
+    private void cancelWbAuth(long chatId, String callbackId, ChatSubscription chat) {
+        cancelPendingInput(chat);
+        maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildWbAuthCancelledMessage(),
+                maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+    }
+
+    private void confirmWbAuthCode(ChatSubscription chat, String rawText) {
+        long chatId = chat.chatId();
+        String flowId = chat.pendingWbAuthFlowId();
+        String phoneNumber = chat.pendingWbAuthPhoneNumber();
+        if (flowId == null || flowId.isBlank() || phoneNumber == null || phoneNumber.isBlank()) {
+            chatSettingsService.clearPendingWbAuth(chatId);
+            throw new IllegalStateException("Сессия авторизации WB потеряна. Начните подключение заново.");
+        }
+
+        String storageStateJson;
+        try {
+            storageStateJson = wbLoginFlowService.confirm(flowId, rawText);
+        } catch (IllegalStateException e) {
+            chatSettingsService.clearPendingWbAuth(chatId);
+            throw e;
+        }
+
+        wbAccountService.attachAccount(chatId, phoneNumber, storageStateJson);
+        chatSettingsService.clearPendingWbAuth(chatId);
+        maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthSuccessMessage(phoneNumber));
+        maxMessagingService.sendToChat(chatId,
+                maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
     }
 
     private void toggleAccount(long chatId, String callbackId, long accountId) {
@@ -242,6 +323,21 @@ public class MaxUpdateHandler {
     private MaxOutgoingMessage buildMainMenu(long chatId) {
         ChatSubscription chat = chatSettingsService.getRequired(chatId);
         return maxBotUiService.buildMainMenu(chat, wbAccountService.countAccounts(chatId));
+    }
+
+    private void cancelPendingInput(ChatSubscription chat) {
+        if (chat.pendingInputState() == null || chat.pendingInputState().isBlank()) {
+            return;
+        }
+
+        if (ChatSettingsService.PENDING_WB_AUTH_PHONE.equals(chat.pendingInputState())
+                || ChatSettingsService.PENDING_WB_AUTH_CODE.equals(chat.pendingInputState())) {
+            wbLoginFlowService.cancel(chat.pendingWbAuthFlowId());
+            chatSettingsService.clearPendingWbAuth(chat.chatId());
+            return;
+        }
+
+        chatSettingsService.clearPendingInputState(chat.chatId());
     }
 
     private String normalizePhoneNumber(String rawText) {

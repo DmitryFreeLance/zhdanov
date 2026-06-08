@@ -12,6 +12,8 @@ create table if not exists chat_subscription (
     call_enabled integer not null default 0,
     phone_number text,
     pending_input_state text,
+    pending_wb_auth_flow_id text,
+    pending_wb_auth_phone_number text,
     created_at text not null,
     last_seen_at text not null
 );

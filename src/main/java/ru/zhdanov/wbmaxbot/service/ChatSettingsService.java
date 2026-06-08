@@ -15,6 +15,8 @@ public class ChatSettingsService {
     public static final String PENDING_PHONE = "phone";
     public static final String PENDING_SHK_THRESHOLD = "shk-threshold";
     public static final String PENDING_RATIO_THRESHOLD = "ratio-threshold";
+    public static final String PENDING_WB_AUTH_PHONE = "wb-auth-phone";
+    public static final String PENDING_WB_AUTH_CODE = "wb-auth-code";
 
     private final SubscriptionRepository subscriptionRepository;
     private final ZoneId zoneId;
@@ -79,6 +81,18 @@ public class ChatSettingsService {
 
     public void clearPendingInputState(long chatId) {
         subscriptionRepository.updatePendingInputState(chatId, null);
+    }
+
+    public void startPendingWbAuthPhone(long chatId) {
+        subscriptionRepository.updatePendingWbAuth(chatId, PENDING_WB_AUTH_PHONE, null, null);
+    }
+
+    public void startPendingWbAuthCode(long chatId, String flowId, String phoneNumber) {
+        subscriptionRepository.updatePendingWbAuth(chatId, PENDING_WB_AUTH_CODE, flowId, phoneNumber);
+    }
+
+    public void clearPendingWbAuth(long chatId) {
+        subscriptionRepository.updatePendingWbAuth(chatId, null, null, null);
     }
 
     public OffsetDateTime now() {

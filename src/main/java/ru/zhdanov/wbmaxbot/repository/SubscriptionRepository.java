@@ -68,6 +68,7 @@ public class SubscriptionRepository {
                 select chat_id, user_id, title, chat_type, active,
                        auto_report_enabled, report_interval_minutes, last_report_sent_at,
                        shk_threshold, ratio_threshold, call_enabled, phone_number, pending_input_state,
+                       pending_wb_auth_flow_id, pending_wb_auth_phone_number,
                        created_at, last_seen_at
                 from chat_subscription
                 where active = 1
@@ -82,6 +83,7 @@ public class SubscriptionRepository {
                 select chat_id, user_id, title, chat_type, active,
                        auto_report_enabled, report_interval_minutes, last_report_sent_at,
                        shk_threshold, ratio_threshold, call_enabled, phone_number, pending_input_state,
+                       pending_wb_auth_flow_id, pending_wb_auth_phone_number,
                        created_at, last_seen_at
                 from chat_subscription
                 where chat_id = ?
@@ -171,6 +173,21 @@ public class SubscriptionRepository {
         );
     }
 
+    public void updatePendingWbAuth(long chatId, String pendingInputState, String flowId, String phoneNumber) {
+        jdbcTemplate.update("""
+                update chat_subscription
+                set pending_input_state = ?,
+                    pending_wb_auth_flow_id = ?,
+                    pending_wb_auth_phone_number = ?
+                where chat_id = ?
+                """,
+                pendingInputState,
+                flowId,
+                phoneNumber,
+                chatId
+        );
+    }
+
     public int countActive() {
         Integer count = jdbcTemplate.queryForObject("""
                 select count(*) from chat_subscription where active = 1
@@ -196,6 +213,8 @@ public class SubscriptionRepository {
                 rs.getInt("call_enabled") == 1,
                 rs.getString("phone_number"),
                 rs.getString("pending_input_state"),
+                rs.getString("pending_wb_auth_flow_id"),
+                rs.getString("pending_wb_auth_phone_number"),
                 OffsetDateTime.parse(rs.getString("created_at")),
                 OffsetDateTime.parse(rs.getString("last_seen_at"))
         );

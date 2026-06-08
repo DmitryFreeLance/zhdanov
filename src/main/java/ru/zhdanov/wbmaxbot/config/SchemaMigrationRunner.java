@@ -38,6 +38,8 @@ public class SchemaMigrationRunner {
         addColumnIfMissing(columns, "call_enabled", "alter table chat_subscription add column call_enabled integer not null default 0");
         addColumnIfMissing(columns, "phone_number", "alter table chat_subscription add column phone_number text");
         addColumnIfMissing(columns, "pending_input_state", "alter table chat_subscription add column pending_input_state text");
+        addColumnIfMissing(columns, "pending_wb_auth_flow_id", "alter table chat_subscription add column pending_wb_auth_flow_id text");
+        addColumnIfMissing(columns, "pending_wb_auth_phone_number", "alter table chat_subscription add column pending_wb_auth_phone_number text");
     }
 
     private Set<String> loadColumnNames(String tableName) {
