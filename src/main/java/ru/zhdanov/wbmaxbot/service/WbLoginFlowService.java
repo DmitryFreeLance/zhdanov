@@ -35,6 +35,7 @@ public class WbLoginFlowService {
     private static final Logger log = LoggerFactory.getLogger(WbLoginFlowService.class);
     private static final String LOGIN_URL = "https://logistics.wildberries.ru/auth/login";
     private static final Duration FLOW_TTL = Duration.ofMinutes(10);
+    private static final int AUTH_START_ATTEMPTS = 2;
     private static final String DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -59,38 +60,30 @@ public class WbLoginFlowService {
 
     public StartedAuth start(String phoneNumber) {
         String normalizedPhone = normalizePhone(phoneNumber);
-        log.info("Starting WB auth flow for {}", maskPhone(normalizedPhone));
+        IllegalStateException lastError = null;
 
-        try {
-            Playwright playwright = Playwright.create();
-            Browser browser = playwright.chromium().launch(defaultLaunchOptions(properties.getWildberries().isHeadless()));
-            BrowserContext context = browser.newContext(defaultContextOptions());
-            context.setExtraHTTPHeaders(Map.of(
-                    "Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-                    "Upgrade-Insecure-Requests", "1"
-            ));
-            context.addInitScript(buildStealthInitScript());
-            Page page = context.newPage();
-            page.navigate(LOGIN_URL,
-                    new Page.NavigateOptions()
-                            .setTimeout(timeoutMs())
-                            .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
-            log.info("WB auth page opened for {}", maskPhone(normalizedPhone));
-
-            waitForLoginUi(page, properties.getWildberries().getTimeout());
-            fillPhoneAndRequestCode(page, normalizedPhone);
-            log.info("WB phone submitted for {}", maskPhone(normalizedPhone));
-            waitForCodeUi(page, properties.getWildberries().getTimeout());
-            String codeScreenHint = extractCodeScreenHint(page);
-            log.info("WB code input detected for {}. Hint: {}", maskPhone(normalizedPhone), codeScreenHint);
-
-            String flowId = UUID.randomUUID().toString();
-            pendingFlows.put(flowId, new PendingFlow(playwright, browser, context, page, normalizedPhone, OffsetDateTime.now(zoneId).plus(FLOW_TTL)));
-            return new StartedAuth(flowId, normalizedPhone, codeScreenHint);
-        } catch (Exception e) {
-            log.warn("WB auth start failed for {}: {}", maskPhone(normalizedPhone), e.getMessage());
-            throw new IllegalStateException("Не удалось начать авторизацию WB: " + e.getMessage(), e);
+        for (int attempt = 1; attempt <= AUTH_START_ATTEMPTS; attempt++) {
+            log.info("Starting WB auth flow for {} (attempt {}/{})", maskPhone(normalizedPhone), attempt, AUTH_START_ATTEMPTS);
+            try {
+                return startAttempt(normalizedPhone, attempt);
+            } catch (IllegalStateException e) {
+                lastError = e;
+                log.warn("WB auth start attempt {} failed for {}: {}", attempt, maskPhone(normalizedPhone), e.getMessage());
+                if (attempt < AUTH_START_ATTEMPTS && shouldRetryStart(e)) {
+                    try {
+                        Thread.sleep(1500);
+                    } catch (InterruptedException interruptedException) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
         }
+
+        throw new IllegalStateException("Не удалось начать авторизацию WB: "
+                + (lastError == null ? "неизвестная ошибка" : lastError.getMessage()), lastError);
     }
 
     public String confirm(String flowId, String code) {
@@ -254,6 +247,10 @@ public class WbLoginFlowService {
         while (System.currentTimeMillis() < deadline) {
             if (hasCodeInput(page)) {
                 return;
+            }
+            String hint = extractCodeScreenHint(page);
+            if (hint.contains("Не удалось запросить код")) {
+                throw new IllegalStateException("WB вернул ошибку после отправки номера: " + hint);
             }
             page.waitForTimeout(1000);
         }
@@ -429,6 +426,26 @@ public class WbLoginFlowService {
                 Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
                 Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
                 Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                Object.defineProperty(navigator, 'userAgentData', {
+                  get: () => ({
+                    brands: [
+                      { brand: 'Chromium', version: '126' },
+                      { brand: 'Google Chrome', version: '126' },
+                      { brand: 'Not.A/Brand', version: '24' }
+                    ],
+                    mobile: false,
+                    platform: 'Windows',
+                    getHighEntropyValues: async () => ({
+                      architecture: 'x86',
+                      bitness: '64',
+                      mobile: false,
+                      model: '',
+                      platform: 'Windows',
+                      platformVersion: '10.0.0',
+                      uaFullVersion: '126.0.0.0'
+                    })
+                  })
+                });
                 Object.defineProperty(navigator, 'plugins', {
                   get: () => [
                     { name: 'Chrome PDF Plugin' },
@@ -446,6 +463,83 @@ public class WbLoginFlowService {
                   );
                 }
                 """;
+    }
+
+    private StartedAuth startAttempt(String normalizedPhone, int attempt) {
+        Playwright playwright = null;
+        Browser browser = null;
+        BrowserContext context = null;
+        Page page = null;
+        boolean keepOpen = false;
+        try {
+            playwright = Playwright.create();
+            browser = playwright.chromium().launch(defaultLaunchOptions(false));
+            context = browser.newContext(defaultContextOptions());
+            context.setExtraHTTPHeaders(Map.of(
+                    "Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "Upgrade-Insecure-Requests", "1",
+                    "Sec-CH-UA", "\"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\", \"Not.A/Brand\";v=\"24\"",
+                    "Sec-CH-UA-Mobile", "?0",
+                    "Sec-CH-UA-Platform", "\"Windows\""
+            ));
+            context.addInitScript(buildStealthInitScript());
+            page = context.newPage();
+            page.navigate(LOGIN_URL,
+                    new Page.NavigateOptions()
+                            .setTimeout(timeoutMs())
+                            .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+            page.waitForTimeout(1200);
+            log.info("WB auth page opened for {} on attempt {}", maskPhone(normalizedPhone), attempt);
+
+            waitForLoginUi(page, properties.getWildberries().getTimeout());
+            fillPhoneAndRequestCode(page, normalizedPhone);
+            log.info("WB phone submitted for {} on attempt {}", maskPhone(normalizedPhone), attempt);
+            waitForCodeUi(page, properties.getWildberries().getTimeout());
+            String codeScreenHint = extractCodeScreenHint(page);
+            log.info("WB code input detected for {}. Hint: {}", maskPhone(normalizedPhone), codeScreenHint);
+
+            String flowId = UUID.randomUUID().toString();
+            pendingFlows.put(flowId, new PendingFlow(playwright, browser, context, page, normalizedPhone, OffsetDateTime.now(zoneId).plus(FLOW_TTL)));
+            keepOpen = true;
+            return new StartedAuth(flowId, normalizedPhone, codeScreenHint);
+        } catch (Exception e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        } finally {
+            if (!keepOpen) {
+                safelyClose(playwright, browser, context);
+            }
+        }
+    }
+
+    private boolean shouldRetryStart(IllegalStateException error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        return message.contains("Не удалось запросить код")
+                || message.contains("Execution context was destroyed")
+                || message.contains("Не удалось дождаться формы входа");
+    }
+
+    private void safelyClose(Playwright playwright, Browser browser, BrowserContext context) {
+        try {
+            if (context != null) {
+                context.close();
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            if (browser != null) {
+                browser.close();
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            if (playwright != null) {
+                playwright.close();
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     public record StartedAuth(String flowId, String normalizedPhone, String message) {
