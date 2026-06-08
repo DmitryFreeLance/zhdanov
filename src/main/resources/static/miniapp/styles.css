@@ -58,12 +58,28 @@ input {
     font-size: 16px;
 }
 
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #d0d5dd;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    resize: vertical;
+}
+
 button {
     border: 0;
     border-radius: 12px;
     padding: 12px 16px;
     font-size: 15px;
     cursor: pointer;
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: wait;
 }
 
 button.primary {
@@ -111,4 +127,9 @@ button.ghost {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.95em;
 }

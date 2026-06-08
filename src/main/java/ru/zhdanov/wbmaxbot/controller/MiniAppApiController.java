@@ -18,6 +18,7 @@ import ru.zhdanov.wbmaxbot.service.MaxMiniAppAuthService;
 import ru.zhdanov.wbmaxbot.service.MiniAppSessionService;
 import ru.zhdanov.wbmaxbot.service.WbAccountService;
 import ru.zhdanov.wbmaxbot.service.WbLoginFlowService;
+import ru.zhdanov.wbmaxbot.service.WildberriesScraper;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,17 +35,20 @@ public class MiniAppApiController {
     private final MaxMessagingService maxMessagingService;
     private final WbAccountService wbAccountService;
     private final WbLoginFlowService wbLoginFlowService;
+    private final WildberriesScraper wildberriesScraper;
 
     public MiniAppApiController(MaxMiniAppAuthService maxMiniAppAuthService,
                                 MiniAppSessionService miniAppSessionService,
                                 MaxMessagingService maxMessagingService,
                                 WbAccountService wbAccountService,
-                                WbLoginFlowService wbLoginFlowService) {
+                                WbLoginFlowService wbLoginFlowService,
+                                WildberriesScraper wildberriesScraper) {
         this.maxMiniAppAuthService = maxMiniAppAuthService;
         this.miniAppSessionService = miniAppSessionService;
         this.maxMessagingService = maxMessagingService;
         this.wbAccountService = wbAccountService;
         this.wbLoginFlowService = wbLoginFlowService;
+        this.wildberriesScraper = wildberriesScraper;
     }
 
     @PostMapping("/session")
@@ -101,6 +105,30 @@ public class MiniAppApiController {
         wbAccountService.attachAccount(principal.chatId(), payload.get("phoneNumber"), storageStateJson);
         return ResponseEntity.ok(Map.of(
                 "success", true,
+                "accounts", wbAccountService.listAccounts(principal.chatId())
+        ));
+    }
+
+    @PostMapping("/wb-auth/import")
+    public ResponseEntity<Map<String, Object>> importAuth(@RequestBody Map<String, String> payload) {
+        MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
+        requireAdmin(principal);
+
+        String phoneNumber = payload.get("phoneNumber");
+        String storageStateJson = payload.get("storageStateJson");
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new IllegalArgumentException("Введите телефон WB для привязки аккаунта.");
+        }
+        if (storageStateJson == null || storageStateJson.isBlank()) {
+            throw new IllegalArgumentException("Пришлите JSON storage state из браузера.");
+        }
+
+        wildberriesScraper.scrapeReport(storageStateJson);
+        wbAccountService.attachAccount(principal.chatId(), phoneNumber, storageStateJson);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "WB-сессия проверена и подключена.",
                 "accounts", wbAccountService.listAccounts(principal.chatId())
         ));
     }

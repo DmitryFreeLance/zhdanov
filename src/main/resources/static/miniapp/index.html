@@ -33,6 +33,20 @@
     </section>
 
     <section class="card">
+        <h2>Импорт готовой сессии</h2>
+        <p class="muted">Если WB режет отправку кода с сервера, можно войти в обычном браузере и загрузить сюда готовый <code>storageState.json</code>.</p>
+        <label>
+            Файл storage state
+            <input id="storageStateFileInput" type="file" accept=".json,application/json">
+        </label>
+        <label>
+            Или вставьте JSON вручную
+            <textarea id="storageStateInput" rows="7" placeholder='{"cookies":[...],"origins":[...]}'></textarea>
+        </label>
+        <button id="importSessionButton" class="primary">Импортировать сессию</button>
+    </section>
+
+    <section class="card">
         <div class="row">
             <h2>Подключённые аккаунты</h2>
             <button id="refreshButton" class="ghost">Обновить</button>

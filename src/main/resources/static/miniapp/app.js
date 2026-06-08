@@ -5,6 +5,9 @@ const startAuthButton = document.getElementById("startAuthButton");
 const codeSection = document.getElementById("codeSection");
 const codeInput = document.getElementById("codeInput");
 const confirmCodeButton = document.getElementById("confirmCodeButton");
+const storageStateFileInput = document.getElementById("storageStateFileInput");
+const storageStateInput = document.getElementById("storageStateInput");
+const importSessionButton = document.getElementById("importSessionButton");
 const refreshButton = document.getElementById("refreshButton");
 
 let sessionToken = null;
@@ -12,6 +15,7 @@ let pendingFlowId = null;
 let pendingPhoneNumber = null;
 let startAuthInFlight = false;
 let confirmAuthInFlight = false;
+let importSessionInFlight = false;
 
 init().catch((error) => {
   setStatus(error.message || "Не удалось открыть mini app.", "error");
@@ -30,7 +34,7 @@ async function init() {
   });
 
   sessionToken = session.sessionToken;
-  setStatus(`Привет, ${session.firstName}. Можно подключать аккаунты WB.`, "success");
+  setStatus(`Привет, ${session.firstName}. Можно подключать аккаунты WB или импортировать готовую сессию.`, "success");
   await reloadAccounts();
 }
 
@@ -59,6 +63,55 @@ startAuthButton.addEventListener("click", async () => {
   } finally {
     startAuthInFlight = false;
     startAuthButton.disabled = false;
+  }
+});
+
+storageStateFileInput.addEventListener("change", async (event) => {
+  const [file] = event.target.files || [];
+  if (!file) {
+    return;
+  }
+  try {
+    storageStateInput.value = await file.text();
+    setStatus("JSON storage state загружен из файла. Теперь нажмите «Импортировать сессию».", "success");
+  } catch (error) {
+    setStatus(error.message || "Не удалось прочитать файл storage state.", "error");
+  }
+});
+
+importSessionButton.addEventListener("click", async () => {
+  if (importSessionInFlight) {
+    return;
+  }
+  try {
+    const phoneNumber = phoneInput.value.trim();
+    const storageStateJson = storageStateInput.value.trim();
+    if (!phoneNumber) {
+      throw new Error("Введите телефон WB.");
+    }
+    if (!storageStateJson) {
+      throw new Error("Выберите файл storage state или вставьте JSON вручную.");
+    }
+    importSessionInFlight = true;
+    importSessionButton.disabled = true;
+    setStatus("Проверяю и импортирую WB-сессию…");
+    const result = await api("/api/miniapp/wb-auth/import", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionToken,
+        phoneNumber,
+        storageStateJson,
+      }),
+    });
+    storageStateFileInput.value = "";
+    storageStateInput.value = "";
+    setStatus(result.message || "WB-сессия импортирована.", "success");
+    renderAccounts(result.accounts || []);
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    importSessionInFlight = false;
+    importSessionButton.disabled = false;
   }
 });
 
