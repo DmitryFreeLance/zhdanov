@@ -234,7 +234,8 @@ public class MaxUpdateHandler {
 
     private MaxOutgoingMessage buildStatusMenu(long chatId) {
         ChatSubscription chat = chatSettingsService.getRequired(chatId);
-        boolean sessionExists = Files.exists(properties.getWildberries().getStorageStatePath().toAbsolutePath());
+        boolean sessionExists = Files.exists(properties.getWildberries().getStorageStatePath().toAbsolutePath())
+                || wbAccountService.countAccounts(chatId) > 0;
         return maxBotUiService.buildStatusMenu(chat, sessionExists, properties.getMode(), maxMessagingService.activeChatsCount());
     }
 
