@@ -35,6 +35,17 @@
     <section class="card">
         <h2>Импорт готовой сессии</h2>
         <p class="muted">Если WB режет отправку кода с сервера, можно войти в обычном браузере и загрузить сюда готовый <code>storageState.json</code>.</p>
+        <div class="helper-box">
+            <div class="helper-head">
+                <strong>Упрощённый способ</strong>
+                <button id="copyExportScriptButton" class="ghost" type="button">Скопировать скрипт</button>
+            </div>
+            <ol class="helper-steps">
+                <li>Откройте <code>wb.logistics</code> в обычном браузере и войдите в аккаунт.</li>
+                <li>На странице WB откройте консоль браузера и вставьте скрипт из кнопки выше.</li>
+                <li>Скрипт сам скопирует JSON. Вернитесь в mini app и вставьте его в поле ниже.</li>
+            </ol>
+        </div>
         <label>
             Файл storage state
             <input id="storageStateFileInput" type="file" accept=".json,application/json">

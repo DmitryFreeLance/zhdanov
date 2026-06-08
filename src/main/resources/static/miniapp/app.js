@@ -5,6 +5,7 @@ const startAuthButton = document.getElementById("startAuthButton");
 const codeSection = document.getElementById("codeSection");
 const codeInput = document.getElementById("codeInput");
 const confirmCodeButton = document.getElementById("confirmCodeButton");
+const copyExportScriptButton = document.getElementById("copyExportScriptButton");
 const storageStateFileInput = document.getElementById("storageStateFileInput");
 const storageStateInput = document.getElementById("storageStateInput");
 const importSessionButton = document.getElementById("importSessionButton");
@@ -16,6 +17,46 @@ let pendingPhoneNumber = null;
 let startAuthInFlight = false;
 let confirmAuthInFlight = false;
 let importSessionInFlight = false;
+
+const WB_EXPORT_SCRIPT = String.raw`(() => {
+  const cookies = Object.fromEntries(
+    document.cookie
+      .split(/;\s*/)
+      .filter(Boolean)
+      .map((part) => {
+        const index = part.indexOf("=");
+        return [
+          decodeURIComponent(index >= 0 ? part.slice(0, index) : part),
+          decodeURIComponent(index >= 0 ? part.slice(index + 1) : "")
+        ];
+      })
+  );
+  const localStorageData = {};
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    localStorageData[key] = localStorage.getItem(key);
+  }
+  const payload = {
+    exportKind: "wb-miniapp-browser-export",
+    url: location.href,
+    origin: location.origin,
+    hostname: location.hostname,
+    userAgent: navigator.userAgent,
+    exportedAt: new Date().toISOString(),
+    cookies,
+    localStorage: localStorageData
+  };
+  const text = JSON.stringify(payload, null, 2);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => alert("JSON WB-сессии скопирован. Вернитесь в mini app и вставьте его."),
+      () => console.log(text)
+    );
+  } else {
+    console.log(text);
+    alert("Не удалось скопировать автоматически. JSON выведен в консоль.");
+  }
+})();`;
 
 init().catch((error) => {
   setStatus(error.message || "Не удалось открыть mini app.", "error");
@@ -112,6 +153,15 @@ importSessionButton.addEventListener("click", async () => {
   } finally {
     importSessionInFlight = false;
     importSessionButton.disabled = false;
+  }
+});
+
+copyExportScriptButton.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(WB_EXPORT_SCRIPT);
+    setStatus("Скрипт скопирован. Откройте WB в обычном браузере, вставьте его в консоль и потом вставьте полученный JSON сюда.", "success");
+  } catch (error) {
+    setStatus("Не удалось скопировать скрипт автоматически. Разрешите доступ к буферу обмена.", "error");
   }
 });
 

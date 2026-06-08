@@ -18,6 +18,7 @@ import ru.zhdanov.wbmaxbot.service.MaxMiniAppAuthService;
 import ru.zhdanov.wbmaxbot.service.MiniAppSessionService;
 import ru.zhdanov.wbmaxbot.service.WbAccountService;
 import ru.zhdanov.wbmaxbot.service.WbLoginFlowService;
+import ru.zhdanov.wbmaxbot.service.WbStorageStateImportService;
 import ru.zhdanov.wbmaxbot.service.WildberriesScraper;
 
 import java.util.Map;
@@ -35,6 +36,7 @@ public class MiniAppApiController {
     private final MaxMessagingService maxMessagingService;
     private final WbAccountService wbAccountService;
     private final WbLoginFlowService wbLoginFlowService;
+    private final WbStorageStateImportService wbStorageStateImportService;
     private final WildberriesScraper wildberriesScraper;
 
     public MiniAppApiController(MaxMiniAppAuthService maxMiniAppAuthService,
@@ -42,12 +44,14 @@ public class MiniAppApiController {
                                 MaxMessagingService maxMessagingService,
                                 WbAccountService wbAccountService,
                                 WbLoginFlowService wbLoginFlowService,
+                                WbStorageStateImportService wbStorageStateImportService,
                                 WildberriesScraper wildberriesScraper) {
         this.maxMiniAppAuthService = maxMiniAppAuthService;
         this.miniAppSessionService = miniAppSessionService;
         this.maxMessagingService = maxMessagingService;
         this.wbAccountService = wbAccountService;
         this.wbLoginFlowService = wbLoginFlowService;
+        this.wbStorageStateImportService = wbStorageStateImportService;
         this.wildberriesScraper = wildberriesScraper;
     }
 
@@ -123,8 +127,9 @@ public class MiniAppApiController {
             throw new IllegalArgumentException("Пришлите JSON storage state из браузера.");
         }
 
-        wildberriesScraper.scrapeReport(storageStateJson);
-        wbAccountService.attachAccount(principal.chatId(), phoneNumber, storageStateJson);
+        String normalizedStorageStateJson = wbStorageStateImportService.normalize(storageStateJson);
+        wildberriesScraper.scrapeReport(normalizedStorageStateJson);
+        wbAccountService.attachAccount(principal.chatId(), phoneNumber, normalizedStorageStateJson);
 
         return ResponseEntity.ok(Map.of(
                 "success", true,

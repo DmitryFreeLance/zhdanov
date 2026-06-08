@@ -103,6 +103,30 @@ button.ghost {
     gap: 12px;
 }
 
+.helper-box {
+    margin-bottom: 14px;
+    padding: 14px;
+    border-radius: 14px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.helper-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.helper-steps {
+    margin: 0;
+    padding-left: 18px;
+    color: #475467;
+    display: grid;
+    gap: 8px;
+}
+
 .account {
     display: grid;
     gap: 12px;
