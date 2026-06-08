@@ -19,14 +19,15 @@ import ru.zhdanov.wbmaxbot.service.MiniAppSessionService;
 import ru.zhdanov.wbmaxbot.service.WbAccountService;
 import ru.zhdanov.wbmaxbot.service.WbLoginFlowService;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/miniapp")
 public class MiniAppApiController {
 
     private static final long ADMIN_USER_ID = 188421258L;
+    private final Map<Long, Boolean> authStartsInFlight = new ConcurrentHashMap<>();
 
     private final MaxMiniAppAuthService maxMiniAppAuthService;
     private final MiniAppSessionService miniAppSessionService;
@@ -75,14 +76,21 @@ public class MiniAppApiController {
     public ResponseEntity<Map<String, Object>> startAuth(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
         requireAdmin(principal);
-        WbLoginFlowService.StartedAuth startedAuth = wbLoginFlowService.start(payload.get("phoneNumber"));
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "chatId", principal.chatId(),
-                "flowId", startedAuth.flowId(),
-                "phoneNumber", startedAuth.normalizedPhone(),
-                "message", startedAuth.message()
-        ));
+        if (authStartsInFlight.putIfAbsent(principal.chatId(), Boolean.TRUE) != null) {
+            throw new IllegalStateException("Авторизация WB уже запускается. Подождите несколько секунд.");
+        }
+        try {
+            WbLoginFlowService.StartedAuth startedAuth = wbLoginFlowService.start(payload.get("phoneNumber"));
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "chatId", principal.chatId(),
+                    "flowId", startedAuth.flowId(),
+                    "phoneNumber", startedAuth.normalizedPhone(),
+                    "message", startedAuth.message()
+            ));
+        } finally {
+            authStartsInFlight.remove(principal.chatId());
+        }
     }
 
     @PostMapping("/wb-auth/confirm")

@@ -10,6 +10,8 @@ const refreshButton = document.getElementById("refreshButton");
 let sessionToken = null;
 let pendingFlowId = null;
 let pendingPhoneNumber = null;
+let startAuthInFlight = false;
+let confirmAuthInFlight = false;
 
 init().catch((error) => {
   setStatus(error.message || "Не удалось открыть mini app.", "error");
@@ -33,11 +35,16 @@ async function init() {
 }
 
 startAuthButton.addEventListener("click", async () => {
+  if (startAuthInFlight) {
+    return;
+  }
   try {
     const phoneNumber = phoneInput.value.trim();
     if (!phoneNumber) {
       throw new Error("Введите телефон WB.");
     }
+    startAuthInFlight = true;
+    startAuthButton.disabled = true;
     setStatus("Запрашиваю код у WB…");
     const result = await api("/api/miniapp/wb-auth/start", {
       method: "POST",
@@ -49,10 +56,16 @@ startAuthButton.addEventListener("click", async () => {
     setStatus(result.message || "Код отправлен. Введите его ниже.", "success");
   } catch (error) {
     setStatus(error.message, "error");
+  } finally {
+    startAuthInFlight = false;
+    startAuthButton.disabled = false;
   }
 });
 
 confirmCodeButton.addEventListener("click", async () => {
+  if (confirmAuthInFlight) {
+    return;
+  }
   try {
     const code = codeInput.value.trim();
     if (!pendingFlowId || !pendingPhoneNumber) {
@@ -61,6 +74,8 @@ confirmCodeButton.addEventListener("click", async () => {
     if (!code) {
       throw new Error("Введите код из SMS.");
     }
+    confirmAuthInFlight = true;
+    confirmCodeButton.disabled = true;
     setStatus("Подтверждаю код и сохраняю сессию WB…");
     const result = await api("/api/miniapp/wb-auth/confirm", {
       method: "POST",
@@ -79,6 +94,9 @@ confirmCodeButton.addEventListener("click", async () => {
     renderAccounts(result.accounts || []);
   } catch (error) {
     setStatus(error.message, "error");
+  } finally {
+    confirmAuthInFlight = false;
+    confirmCodeButton.disabled = false;
   }
 });
 
