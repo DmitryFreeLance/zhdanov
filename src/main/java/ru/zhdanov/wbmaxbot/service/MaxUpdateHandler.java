@@ -242,7 +242,18 @@ public class MaxUpdateHandler {
                     chatSettingsService.startPendingWbAuthStarting(chatId, phone);
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartingMessage(phone));
                     wbLoginFlowService.startAsync(phone)
-                            .whenComplete((startedAuth, error) -> handleStartedWbAuth(chatId, phone, startedAuth, error));
+                            .whenComplete((startedAuth, error) -> {
+                                try {
+                                    handleStartedWbAuth(chatId, phone, startedAuth, error);
+                                } catch (Exception callbackError) {
+                                    log.error("Failed to finish async WB auth start for chat {}", chatId, callbackError);
+                                    chatSettingsService.clearPendingWbAuth(chatId);
+                                    maxMessagingService.sendToChat(chatId,
+                                            "Не удалось завершить запуск авторизации WB: " + safeMessage(callbackError));
+                                    maxMessagingService.sendToChat(chatId,
+                                            maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+                                }
+                            });
                 }
                 case ChatSettingsService.PENDING_WB_AUTH_STARTING ->
                         maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStillStartingMessage());
@@ -340,14 +351,19 @@ public class MaxUpdateHandler {
                                      String requestedPhone,
                                      WbLoginFlowService.StartedAuth startedAuth,
                                      Throwable error) {
+        log.info("Handling async WB auth result for chat {}. success={}, error={}",
+                chatId, error == null, error == null ? "-" : safeMessage(error));
+
         ChatSubscription latestChat = chatSettingsService.getRequired(chatId);
         boolean stillWaitingForStart = ChatSettingsService.PENDING_WB_AUTH_STARTING.equals(latestChat.pendingInputState())
                 && requestedPhone.equals(latestChat.pendingWbAuthPhoneNumber());
 
         if (error != null) {
+            log.warn("WB auth async failed for chat {}. stillWaitingForStart={}, state={}",
+                    chatId, stillWaitingForStart, latestChat.pendingInputState());
             if (stillWaitingForStart) {
                 chatSettingsService.clearPendingWbAuth(chatId);
-                maxMessagingService.sendToChat(chatId, unwrapCompletionError(error).getMessage());
+                maxMessagingService.sendToChat(chatId, safeMessage(unwrapCompletionError(error)));
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
             }
@@ -588,5 +604,12 @@ public class MaxUpdateHandler {
             return runtimeException;
         }
         return new IllegalStateException(current == null ? "Ошибка авторизации WB" : current.getMessage(), current);
+    }
+
+    private String safeMessage(Throwable error) {
+        if (error == null || error.getMessage() == null || error.getMessage().isBlank()) {
+            return "Ошибка авторизации WB";
+        }
+        return error.getMessage();
     }
 }
