@@ -74,7 +74,13 @@ public class MaxBotUiService {
         }
 
         List<List<Map<String, Object>>> rows = new ArrayList<>();
-        rows.add(row(callback("🔐 Авторизовать WB", "wb:auth:start")));
+        String miniAppDeepLink = buildMiniAppDeepLink();
+        if (miniAppDeepLink != null) {
+            rows.add(row(link("🔐 Открыть WB mini app", miniAppDeepLink)));
+            rows.add(row(callback("⌨️ Вход в чате", "wb:auth:start")));
+        } else {
+            rows.add(row(callback("🔐 Авторизовать WB", "wb:auth:start")));
+        }
         for (ChatLinkedWbAccount account : accounts) {
             rows.add(row(
                     callback(account.enabled() ? "⏸️ Пауза " + shortPhone(account.phoneNumber()) : "▶️ Включить " + shortPhone(account.phoneNumber()),

@@ -7,6 +7,7 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.WaitUntilState;
+import com.microsoft.playwright.options.ViewportSize;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,9 @@ public class WbLoginFlowService {
     private static final Logger log = LoggerFactory.getLogger(WbLoginFlowService.class);
     private static final String LOGIN_URL = "https://logistics.wildberries.ru/auth/login";
     private static final Duration FLOW_TTL = Duration.ofMinutes(10);
+    private static final String DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
     private final AppProperties properties;
     private final ZoneId zoneId;
@@ -60,10 +64,12 @@ public class WbLoginFlowService {
         try {
             Playwright playwright = Playwright.create();
             Browser browser = playwright.chromium().launch(defaultLaunchOptions(properties.getWildberries().isHeadless()));
-            BrowserContext context = browser.newContext(new Browser.NewContextOptions().setLocale("ru-RU"));
-            context.addInitScript("""
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    """);
+            BrowserContext context = browser.newContext(defaultContextOptions());
+            context.setExtraHTTPHeaders(Map.of(
+                    "Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "Upgrade-Insecure-Requests", "1"
+            ));
+            context.addInitScript(buildStealthInitScript());
             Page page = context.newPage();
             page.navigate(LOGIN_URL,
                     new Page.NavigateOptions()
@@ -191,12 +197,29 @@ public class WbLoginFlowService {
                 .setArgs(List.of(
                         "--disable-blink-features=AutomationControlled",
                         "--disable-dev-shm-usage",
-                        "--no-sandbox"
+                        "--no-sandbox",
+                        "--disable-features=IsolateOrigins,site-per-process",
+                        "--window-size=1440,900",
+                        "--lang=ru-RU",
+                        "--start-maximized"
                 ));
         String browserExecutablePath = properties.getWildberries().getBrowserExecutablePath();
         if (browserExecutablePath != null && !browserExecutablePath.isBlank()) {
             options.setExecutablePath(Path.of(browserExecutablePath));
         }
+        return options;
+    }
+
+    private Browser.NewContextOptions defaultContextOptions() {
+        Browser.NewContextOptions options = new Browser.NewContextOptions()
+                .setLocale("ru-RU")
+                .setTimezoneId(zoneId.getId())
+                .setUserAgent(DESKTOP_USER_AGENT)
+                .setViewportSize(new ViewportSize(1440, 900))
+                .setScreenSize(1440, 900)
+                .setDeviceScaleFactor(1)
+                .setIsMobile(false)
+                .setHasTouch(false);
         return options;
     }
 
@@ -377,6 +400,33 @@ public class WbLoginFlowService {
         } catch (Exception e) {
             return "WB открыл экран ввода кода.";
         }
+    }
+
+    private String buildStealthInitScript() {
+        return """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+                Object.defineProperty(navigator, 'language', { get: () => 'ru-RU' });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                Object.defineProperty(navigator, 'plugins', {
+                  get: () => [
+                    { name: 'Chrome PDF Plugin' },
+                    { name: 'Chrome PDF Viewer' },
+                    { name: 'Native Client' }
+                  ]
+                });
+                window.chrome = window.chrome || { runtime: {} };
+                const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+                if (originalQuery) {
+                  window.navigator.permissions.query = (parameters) => (
+                    parameters && parameters.name === 'notifications'
+                      ? Promise.resolve({ state: Notification.permission })
+                      : originalQuery(parameters)
+                  );
+                }
+                """;
     }
 
     public record StartedAuth(String flowId, String normalizedPhone, String message) {
