@@ -308,7 +308,15 @@ public class WbLoginFlowService {
     }
 
     private int count(Page page, String selector) {
-        return page.locator(selector).count();
+        try {
+            return page.locator(selector).count();
+        } catch (RuntimeException e) {
+            if (isTransientPlaywrightNavigationError(e)) {
+                log.debug("Ignoring transient Playwright navigation error while counting '{}': {}", selector, e.getMessage());
+                return 0;
+            }
+            throw e;
+        }
     }
 
     private com.microsoft.playwright.Locator first(Page page, String selector) {
@@ -400,6 +408,17 @@ public class WbLoginFlowService {
         } catch (Exception e) {
             return "WB открыл экран ввода кода.";
         }
+    }
+
+    private boolean isTransientPlaywrightNavigationError(RuntimeException error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        return message.contains("Execution context was destroyed")
+                || message.contains("Most likely the page has been closed")
+                || message.contains("Target page, context or browser has been closed")
+                || message.contains("Cannot find context with specified id");
     }
 
     private String buildStealthInitScript() {

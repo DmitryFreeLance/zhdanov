@@ -1,6 +1,8 @@
 package ru.zhdanov.wbmaxbot.controller;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +26,8 @@ import java.util.Map;
 @RequestMapping("/api/miniapp")
 public class MiniAppApiController {
 
+    private static final long ADMIN_USER_ID = 188421258L;
+
     private final MaxMiniAppAuthService maxMiniAppAuthService;
     private final MiniAppSessionService miniAppSessionService;
     private final MaxMessagingService maxMessagingService;
@@ -45,6 +49,7 @@ public class MiniAppApiController {
     @PostMapping("/session")
     public ResponseEntity<Map<String, Object>> createSession(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = maxMiniAppAuthService.validate(payload.get("initData"));
+        requireAdmin(principal);
         maxMessagingService.subscribe(principal.chatId(), principal.userId(), "MAX chat " + principal.chatId(), "dialog");
         String sessionToken = miniAppSessionService.create(principal);
         return ResponseEntity.ok(Map.of(
@@ -59,6 +64,7 @@ public class MiniAppApiController {
     @GetMapping("/state")
     public ResponseEntity<Map<String, Object>> getState(@RequestParam("sessionToken") String sessionToken) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(sessionToken);
+        requireAdmin(principal);
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "accounts", wbAccountService.listAccounts(principal.chatId())
@@ -68,6 +74,7 @@ public class MiniAppApiController {
     @PostMapping("/wb-auth/start")
     public ResponseEntity<Map<String, Object>> startAuth(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
+        requireAdmin(principal);
         WbLoginFlowService.StartedAuth startedAuth = wbLoginFlowService.start(payload.get("phoneNumber"));
         return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -81,6 +88,7 @@ public class MiniAppApiController {
     @PostMapping("/wb-auth/confirm")
     public ResponseEntity<Map<String, Object>> confirmAuth(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
+        requireAdmin(principal);
         String storageStateJson = wbLoginFlowService.confirm(payload.get("flowId"), payload.get("code"));
         wbAccountService.attachAccount(principal.chatId(), payload.get("phoneNumber"), storageStateJson);
         return ResponseEntity.ok(Map.of(
@@ -93,6 +101,7 @@ public class MiniAppApiController {
     public ResponseEntity<Map<String, Object>> updateEnabled(@PathVariable long accountId,
                                                              @RequestBody Map<String, Object> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired((String) payload.get("sessionToken"));
+        requireAdmin(principal);
         boolean enabled = Boolean.TRUE.equals(payload.get("enabled"));
         wbAccountService.setEnabled(principal.chatId(), accountId, enabled);
         return ResponseEntity.ok(Map.of(
@@ -105,10 +114,33 @@ public class MiniAppApiController {
     public ResponseEntity<Map<String, Object>> unlinkAccount(@PathVariable long accountId,
                                                              @RequestParam("sessionToken") String sessionToken) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(sessionToken);
+        requireAdmin(principal);
         wbAccountService.unlink(principal.chatId(), accountId);
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "accounts", wbAccountService.listAccounts(principal.chatId())
         ));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleBadRequest(IllegalArgumentException error) {
+        return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", error.getMessage()
+        ));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleStateError(IllegalStateException error) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "success", false,
+                "message", error.getMessage()
+        ));
+    }
+
+    private void requireAdmin(MiniAppPrincipal principal) {
+        if (principal.userId() != ADMIN_USER_ID) {
+            throw new IllegalArgumentException("Доступ к mini app закрыт. Разрешён только администратор.");
+        }
     }
 }
