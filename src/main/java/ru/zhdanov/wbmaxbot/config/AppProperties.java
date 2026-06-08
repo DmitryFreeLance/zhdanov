@@ -151,6 +151,9 @@ public class AppProperties {
 
         private boolean headless = true;
         private String browserExecutablePath;
+        private String proxyServer;
+        private String proxyUsername;
+        private String proxyPassword;
         private Duration timeout = Duration.ofSeconds(45);
         private Duration bootstrapTimeout = Duration.ofMinutes(30);
         @NotNull
@@ -178,6 +181,30 @@ public class AppProperties {
 
         public void setBrowserExecutablePath(String browserExecutablePath) {
             this.browserExecutablePath = browserExecutablePath;
+        }
+
+        public String getProxyServer() {
+            return proxyServer;
+        }
+
+        public void setProxyServer(String proxyServer) {
+            this.proxyServer = proxyServer;
+        }
+
+        public String getProxyUsername() {
+            return proxyUsername;
+        }
+
+        public void setProxyUsername(String proxyUsername) {
+            this.proxyUsername = proxyUsername;
+        }
+
+        public String getProxyPassword() {
+            return proxyPassword;
+        }
+
+        public void setProxyPassword(String proxyPassword) {
+            this.proxyPassword = proxyPassword;
         }
 
         public Duration getTimeout() {

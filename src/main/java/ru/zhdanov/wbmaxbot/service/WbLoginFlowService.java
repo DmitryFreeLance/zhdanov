@@ -6,6 +6,7 @@ import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.Proxy;
 import com.microsoft.playwright.options.WaitUntilState;
 import com.microsoft.playwright.options.ViewportSize;
 import jakarta.annotation.PreDestroy;
@@ -18,6 +19,7 @@ import ru.zhdanov.wbmaxbot.config.AppProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -196,6 +198,17 @@ public class WbLoginFlowService {
                         "--lang=ru-RU",
                         "--start-maximized"
                 ));
+        String proxyServer = properties.getWildberries().getProxyServer();
+        if (proxyServer != null && !proxyServer.isBlank()) {
+            Proxy proxy = new Proxy(proxyServer);
+            if (properties.getWildberries().getProxyUsername() != null && !properties.getWildberries().getProxyUsername().isBlank()) {
+                proxy.setUsername(properties.getWildberries().getProxyUsername());
+            }
+            if (properties.getWildberries().getProxyPassword() != null && !properties.getWildberries().getProxyPassword().isBlank()) {
+                proxy.setPassword(properties.getWildberries().getProxyPassword());
+            }
+            options.setProxy(proxy);
+        }
         String browserExecutablePath = properties.getWildberries().getBrowserExecutablePath();
         if (browserExecutablePath != null && !browserExecutablePath.isBlank()) {
             options.setExecutablePath(Path.of(browserExecutablePath));
@@ -503,7 +516,12 @@ public class WbLoginFlowService {
             keepOpen = true;
             return new StartedAuth(flowId, normalizedPhone, codeScreenHint);
         } catch (Exception e) {
-            throw new IllegalStateException(e.getMessage(), e);
+            String artifactHint = saveFailureArtifacts(page, normalizedPhone, attempt);
+            String message = e.getMessage();
+            if (artifactHint != null && !artifactHint.isBlank()) {
+                message = (message == null || message.isBlank() ? "Ошибка авторизации WB" : message) + ". " + artifactHint;
+            }
+            throw new IllegalStateException(message, e);
         } finally {
             if (!keepOpen) {
                 safelyClose(playwright, browser, context);
@@ -539,6 +557,37 @@ public class WbLoginFlowService {
                 playwright.close();
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    private String saveFailureArtifacts(Page page, String normalizedPhone, int attempt) {
+        if (page == null) {
+            return "";
+        }
+        try {
+            Path artifactsDir = properties.getWildberries().getStorageStatePath()
+                    .toAbsolutePath()
+                    .normalize()
+                    .getParent()
+                    .resolve("wb-auth-failures");
+            Files.createDirectories(artifactsDir);
+
+            String maskedPhone = normalizedPhone.replaceAll("[^0-9]", "");
+            if (maskedPhone.length() > 4) {
+                maskedPhone = maskedPhone.substring(maskedPhone.length() - 4);
+            }
+            String prefix = OffsetDateTime.now(zoneId).toEpochSecond() + "-a" + attempt + "-" + maskedPhone;
+            Path screenshotPath = artifactsDir.resolve(prefix + ".png");
+            Path textPath = artifactsDir.resolve(prefix + ".txt");
+
+            page.screenshot(new Page.ScreenshotOptions().setPath(screenshotPath).setFullPage(true));
+            String pageText = extractCodeScreenHint(page) + System.lineSeparator() + "URL: " + page.url();
+            Files.writeString(textPath, pageText, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            log.info("Saved WB auth failure artifacts: {} and {}", screenshotPath, textPath);
+            return "Скриншот ошибки сохранён: " + screenshotPath;
+        } catch (Exception artifactError) {
+            log.warn("Failed to save WB auth failure artifacts: {}", artifactError.getMessage());
+            return "";
         }
     }
 
