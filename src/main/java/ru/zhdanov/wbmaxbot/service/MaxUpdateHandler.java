@@ -206,6 +206,7 @@ public class MaxUpdateHandler {
             }
             case "call:toggle" -> toggleCall(chatId, callbackId, chat);
             case "wb:auth:start" -> startWbAuth(chatId, callbackId, chat);
+            case "wb:auth:resend" -> resendWbAuthCode(chatId, callbackId, chat);
             case "wb:auth:cancel" -> cancelWbAuth(chatId, callbackId, chat);
             default -> maxMessagingService.answerCallback(chatId, callbackId, "Неизвестное действие", buildMainMenu(chatId));
         }
@@ -286,6 +287,29 @@ public class MaxUpdateHandler {
         cancelPendingInput(chat);
         maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildWbAuthCancelledMessage(),
                 maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+    }
+
+    private void resendWbAuthCode(long chatId, String callbackId, ChatSubscription chat) {
+        if (ChatSettingsService.PENDING_WB_AUTH_STARTING.equals(chat.pendingInputState())) {
+            maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildWbAuthStillStartingMessage(), null);
+            return;
+        }
+        if (!ChatSettingsService.PENDING_WB_AUTH_CODE.equals(chat.pendingInputState())
+                || chat.pendingWbAuthFlowId() == null
+                || chat.pendingWbAuthFlowId().isBlank()) {
+            maxMessagingService.answerCallback(chatId, callbackId, "Активная авторизация WB не найдена.", null);
+            return;
+        }
+
+        try {
+            wbLoginFlowService.resendCode(chat.pendingWbAuthFlowId());
+            maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildWbAuthResentMessage(),
+                    maxBotUiService.buildWbAuthCodePrompt(chat.pendingWbAuthPhoneNumber()));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            chatSettingsService.clearPendingWbAuth(chatId);
+            maxMessagingService.answerCallback(chatId, callbackId, e.getMessage(),
+                    maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+        }
     }
 
     private void confirmWbAuthCode(ChatSubscription chat, String rawText) {

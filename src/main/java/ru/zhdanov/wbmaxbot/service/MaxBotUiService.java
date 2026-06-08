@@ -277,6 +277,7 @@ public class MaxBotUiService {
                 Теперь отправьте код из SMS одним сообщением.
                 Для отмены нажмите кнопку ниже.
                 """.formatted(maskPhone(phoneNumber)).trim(),
+                row(callback("🔁 Отправить код ещё раз", "wb:auth:resend")),
                 row(callback("❌ Отменить", "wb:auth:cancel"))
         );
     }
@@ -295,6 +296,10 @@ public class MaxBotUiService {
 
     public String buildWbAuthStillStartingMessage() {
         return "Ещё запрашиваю код WB. Подождите немного или нажмите Отменить.";
+    }
+
+    public String buildWbAuthResentMessage() {
+        return "Попросил WB отправить код ещё раз.";
     }
 
     public String buildWbAuthSuccessMessage(String phoneNumber) {

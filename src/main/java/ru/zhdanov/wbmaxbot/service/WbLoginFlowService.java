@@ -117,6 +117,23 @@ public class WbLoginFlowService {
         closeFlow(flowId);
     }
 
+    public void resendCode(String flowId) {
+        PendingFlow flow = getRequired(flowId);
+        clickFirst(flow.page(),
+                "button:has-text('Отправить ещё раз')",
+                "button:has-text('Отправить еще раз')",
+                "button:has-text('Отправить повторно')",
+                "button:has-text('Запросить код повторно')",
+                "button:has-text('Получить код повторно')",
+                "button:has-text('Выслать код повторно')",
+                "a:has-text('Отправить ещё раз')",
+                "a:has-text('Отправить еще раз')",
+                "a:has-text('Отправить повторно')"
+        );
+        log.info("WB resend code clicked for {}", maskPhone(flow.phoneNumber()));
+        waitForCodeUi(flow.page(), properties.getWildberries().getTimeout());
+    }
+
     @PreDestroy
     public void shutdownExecutor() {
         authExecutor.shutdownNow();
