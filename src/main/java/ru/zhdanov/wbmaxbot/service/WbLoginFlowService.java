@@ -6,6 +6,8 @@ import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Request;
+import com.microsoft.playwright.Response;
 import com.microsoft.playwright.options.Proxy;
 import com.microsoft.playwright.options.WaitUntilState;
 import com.microsoft.playwright.options.ViewportSize;
@@ -36,6 +38,8 @@ public class WbLoginFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(WbLoginFlowService.class);
     private static final String LOGIN_URL = "https://logistics.wildberries.ru/";
+    private static final String WB_DRIVE_HOST = "drive.wb.ru";
+    private static final String WB_REGISTRATION_CODE_PATH = "/registration/code";
     private static final Duration FLOW_TTL = Duration.ofMinutes(10);
     private static final int AUTH_START_ATTEMPTS = 2;
     private static final String DESKTOP_USER_AGENT =
@@ -238,6 +242,63 @@ public class WbLoginFlowService {
             page.waitForTimeout(1000);
         }
         throw new IllegalStateException("Не удалось дождаться формы входа WB");
+    }
+
+    private void installNetworkDebugHooks(Page page, String normalizedPhone, int attempt) {
+        page.onRequest(request -> {
+            if (!isWbDriveRequest(request.url())) {
+                return;
+            }
+            log.info("WB drive request for {} on attempt {}: {} {} payload={}",
+                    maskPhone(normalizedPhone),
+                    attempt,
+                    request.method(),
+                    request.url(),
+                    truncateForLog(request.postData()));
+        });
+        page.onResponse(response -> logWbDriveResponse(response, normalizedPhone, attempt));
+        page.onRequestFailed(request -> {
+            if (!isWbDriveRequest(request.url())) {
+                return;
+            }
+            log.warn("WB drive request failed for {} on attempt {}: {} {} failure={}",
+                    maskPhone(normalizedPhone),
+                    attempt,
+                    request.method(),
+                    request.url(),
+                    request.failure());
+        });
+    }
+
+    private void logWbDriveResponse(Response response, String normalizedPhone, int attempt) {
+        String url = response.url();
+        if (!isWbDriveRequest(url)) {
+            return;
+        }
+
+        String responseBody = "";
+        try {
+            responseBody = truncateForLog(response.text());
+        } catch (Exception e) {
+            responseBody = "<unable to read response body: " + e.getMessage() + ">";
+        }
+
+        log.info("WB drive response for {} on attempt {}: status={} url={} body={}",
+                maskPhone(normalizedPhone),
+                attempt,
+                response.status(),
+                url,
+                responseBody);
+
+        if (url.contains(WB_REGISTRATION_CODE_PATH)) {
+            Request request = response.request();
+            log.info("WB registration/code exchange for {} on attempt {}: method={} payload={} headers={}",
+                    maskPhone(normalizedPhone),
+                    attempt,
+                    request.method(),
+                    truncateForLog(request.postData()),
+                    truncateForLog(String.valueOf(request.headers())));
+        }
     }
 
     private void fillPhoneAndRequestCode(Page page, String phoneNumber) {
@@ -521,6 +582,7 @@ public class WbLoginFlowService {
             ));
             context.addInitScript(buildStealthInitScript());
             page = context.newPage();
+            installNetworkDebugHooks(page, normalizedPhone, attempt);
             page.navigate(LOGIN_URL,
                     new Page.NavigateOptions()
                             .setTimeout(timeoutMs())
@@ -616,6 +678,21 @@ public class WbLoginFlowService {
     }
 
     public record StartedAuth(String flowId, String normalizedPhone, String message) {
+    }
+
+    private boolean isWbDriveRequest(String url) {
+        return url != null && url.contains(WB_DRIVE_HOST);
+    }
+
+    private String truncateForLog(String value) {
+        if (value == null || value.isBlank()) {
+            return "-";
+        }
+        String normalized = value
+                .replace('\u00A0', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
+        return normalized.length() > 500 ? normalized.substring(0, 500) + "..." : normalized;
     }
 
     private record PendingFlow(
