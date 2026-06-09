@@ -242,9 +242,13 @@ public class WbLoginFlowService {
 
     private void fillPhoneAndRequestCode(Page page, String phoneNumber) {
         Locator phoneInput = first(page, "input[type='tel'], input[inputmode='tel'], input[name*='phone' i], input[autocomplete='tel'], input[placeholder*='тел' i]");
-        phoneInput.click();
-        phoneInput.fill("");
-        phoneInput.type(phoneNumber, new Locator.TypeOptions().setDelay(80));
+        String phoneDigitsForField = localPhoneDigitsForField(phoneNumber);
+        typePhoneIntoMaskedField(phoneInput, phoneDigitsForField);
+        String actualValue = phoneInput.inputValue();
+        String actualDigits = digitsOnly(actualValue);
+        if (!actualDigits.endsWith(phoneDigitsForField)) {
+            throw new IllegalStateException("WB поле телефона приняло номер некорректно: " + actualValue);
+        }
         page.waitForTimeout(300);
         clickFirst(page,
                 "button:has-text('Получить код')",
@@ -253,6 +257,14 @@ public class WbLoginFlowService {
                 "button:has-text('Войти')",
                 "input[type='submit']"
         );
+    }
+
+    private void typePhoneIntoMaskedField(Locator phoneInput, String phoneDigitsForField) {
+        phoneInput.click();
+        phoneInput.press("ControlOrMeta+A");
+        phoneInput.press("Delete");
+        phoneInput.fill("");
+        phoneInput.type(phoneDigitsForField, new Locator.TypeOptions().setDelay(90));
     }
 
     private void waitForCodeUi(Page page, Duration timeout) {
@@ -362,6 +374,18 @@ public class WbLoginFlowService {
             return "+" + digits;
         }
         throw new IllegalArgumentException("Введите номер WB в формате +79991234567");
+    }
+
+    private String localPhoneDigitsForField(String normalizedPhone) {
+        String digits = digitsOnly(normalizedPhone);
+        if (digits.length() != 11 || !digits.startsWith("7")) {
+            throw new IllegalArgumentException("Введите номер WB в формате +79991234567");
+        }
+        return digits.substring(1);
+    }
+
+    private String digitsOnly(String value) {
+        return value == null ? "" : value.replaceAll("[^0-9]", "");
     }
 
     private String maskPhone(String phoneNumber) {
