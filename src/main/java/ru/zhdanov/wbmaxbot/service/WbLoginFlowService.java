@@ -35,7 +35,7 @@ import java.util.concurrent.Executors;
 public class WbLoginFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(WbLoginFlowService.class);
-    private static final String LOGIN_URL = "https://logistics.wildberries.ru/auth/login";
+    private static final String LOGIN_URL = "https://logistics.wildberries.ru/";
     private static final Duration FLOW_TTL = Duration.ofMinutes(10);
     private static final int AUTH_START_ATTEMPTS = 2;
     private static final String DESKTOP_USER_AGENT =
