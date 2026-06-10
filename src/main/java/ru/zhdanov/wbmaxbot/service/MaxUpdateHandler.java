@@ -188,6 +188,16 @@ public class MaxUpdateHandler {
                 chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_RATIO_THRESHOLD);
                 maxMessagingService.answerCallback(chatId, callbackId, "Жду процент заполнения", maxBotUiService.buildRatioPrompt());
             }
+            case "input:parking" -> {
+                chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_ALERT_PARKING);
+                maxMessagingService.answerCallback(chatId, callbackId, "Жду название парковки", maxBotUiService.buildAlertParkingPrompt());
+            }
+            case "parking:clear" -> {
+                cancelPendingInput(chat);
+                chatSettingsService.setAlertParking(chatId, null);
+                maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildAlertParkingSavedMessage(null),
+                        maxBotUiService.buildAlertMenu(chatSettingsService.getRequired(chatId)));
+            }
             case "phone:clear" -> {
                 cancelPendingInput(chat);
                 chatSettingsService.setPhoneNumber(chatId, null);
@@ -226,6 +236,13 @@ public class MaxUpdateHandler {
                     chatSettingsService.setRatioThreshold(chatId, threshold);
                     chatSettingsService.clearPendingInputState(chatId);
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildRatioSavedMessage(threshold));
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildAlertMenu(chatSettingsService.getRequired(chatId)));
+                }
+                case ChatSettingsService.PENDING_ALERT_PARKING -> {
+                    String parking = normalizeAlertParking(rawText);
+                    chatSettingsService.setAlertParking(chatId, parking);
+                    chatSettingsService.clearPendingInputState(chatId);
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildAlertParkingSavedMessage(parking));
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildAlertMenu(chatSettingsService.getRequired(chatId)));
                 }
                 case ChatSettingsService.PENDING_WB_AUTH_PHONE -> {
@@ -479,6 +496,17 @@ public class MaxUpdateHandler {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Введите процент числом, например 90.");
         }
+    }
+
+    private String normalizeAlertParking(String rawText) {
+        String value = rawText == null ? "" : rawText.trim().replaceAll("\\s+", " ");
+        if (value.isBlank() || "0".equals(value) || "-".equals(value)) {
+            return null;
+        }
+        if (value.length() > 120) {
+            throw new IllegalArgumentException("Название парковки слишком длинное.");
+        }
+        return value;
     }
 
     private long parseAccountId(String payload, String prefix) {

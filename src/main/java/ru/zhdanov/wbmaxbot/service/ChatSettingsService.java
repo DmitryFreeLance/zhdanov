@@ -15,6 +15,7 @@ public class ChatSettingsService {
     public static final String PENDING_PHONE = "phone";
     public static final String PENDING_SHK_THRESHOLD = "shk-threshold";
     public static final String PENDING_RATIO_THRESHOLD = "ratio-threshold";
+    public static final String PENDING_ALERT_PARKING = "alert-parking";
     public static final String PENDING_WB_AUTH_PHONE = "wb-auth-phone";
     public static final String PENDING_WB_AUTH_STARTING = "wb-auth-starting";
     public static final String PENDING_WB_AUTH_CODE = "wb-auth-code";
@@ -66,6 +67,10 @@ public class ChatSettingsService {
 
     public void setRatioThreshold(long chatId, Double threshold) {
         subscriptionRepository.updateRatioThreshold(chatId, threshold);
+    }
+
+    public void setAlertParking(long chatId, String alertParking) {
+        subscriptionRepository.updateAlertParking(chatId, alertParking);
     }
 
     public void setCallEnabled(long chatId, boolean enabled) {

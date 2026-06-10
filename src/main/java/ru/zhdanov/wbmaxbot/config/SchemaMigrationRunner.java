@@ -30,6 +30,7 @@ public class SchemaMigrationRunner {
         addColumnIfMissing(columns, "last_report_sent_at", "alter table chat_subscription add column last_report_sent_at text");
         addColumnIfMissing(columns, "shk_threshold", "alter table chat_subscription add column shk_threshold integer default 1200");
         addColumnIfMissing(columns, "ratio_threshold", "alter table chat_subscription add column ratio_threshold real default 0.8");
+        addColumnIfMissing(columns, "alert_parking", "alter table chat_subscription add column alert_parking text");
         jdbcTemplate.update("""
                 update chat_subscription
                 set ratio_threshold = 0.8

@@ -13,6 +13,7 @@ public record ChatSubscription(
         OffsetDateTime lastReportSentAt,
         Integer shkThreshold,
         Double ratioThreshold,
+        String alertParking,
         boolean callEnabled,
         String phoneNumber,
         String pendingInputState,

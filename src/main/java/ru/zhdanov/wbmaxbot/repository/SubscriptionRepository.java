@@ -26,10 +26,10 @@ public class SubscriptionRepository {
         jdbcTemplate.update("""
                 insert into chat_subscription(
                     chat_id, user_id, title, chat_type, active,
-                    auto_report_enabled, report_interval_minutes, shk_threshold, ratio_threshold, call_enabled,
+                    auto_report_enabled, report_interval_minutes, shk_threshold, ratio_threshold, alert_parking, call_enabled,
                     created_at, last_seen_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(chat_id) do update set
                     user_id = excluded.user_id,
                     title = excluded.title,
@@ -46,6 +46,7 @@ public class SubscriptionRepository {
                 15,
                 properties.getAlert().getShkThreshold(),
                 properties.getAlert().getRatioThreshold(),
+                null,
                 0,
                 now.toString(),
                 now.toString()
@@ -67,7 +68,7 @@ public class SubscriptionRepository {
         return jdbcTemplate.query("""
                 select chat_id, user_id, title, chat_type, active,
                        auto_report_enabled, report_interval_minutes, last_report_sent_at,
-                       shk_threshold, ratio_threshold, call_enabled, phone_number, pending_input_state,
+                       shk_threshold, ratio_threshold, alert_parking, call_enabled, phone_number, pending_input_state,
                        pending_wb_auth_flow_id, pending_wb_auth_phone_number,
                        created_at, last_seen_at
                 from chat_subscription
@@ -82,7 +83,7 @@ public class SubscriptionRepository {
         List<ChatSubscription> rows = jdbcTemplate.query("""
                 select chat_id, user_id, title, chat_type, active,
                        auto_report_enabled, report_interval_minutes, last_report_sent_at,
-                       shk_threshold, ratio_threshold, call_enabled, phone_number, pending_input_state,
+                       shk_threshold, ratio_threshold, alert_parking, call_enabled, phone_number, pending_input_state,
                        pending_wb_auth_flow_id, pending_wb_auth_phone_number,
                        created_at, last_seen_at
                 from chat_subscription
@@ -136,6 +137,17 @@ public class SubscriptionRepository {
                 where chat_id = ?
                 """,
                 threshold,
+                chatId
+        );
+    }
+
+    public void updateAlertParking(long chatId, String alertParking) {
+        jdbcTemplate.update("""
+                update chat_subscription
+                set alert_parking = ?
+                where chat_id = ?
+                """,
+                alertParking,
                 chatId
         );
     }
@@ -210,6 +222,7 @@ public class SubscriptionRepository {
                 parseNullableOffsetDateTime(rs.getString("last_report_sent_at")),
                 shkThresholdValue == null ? null : shkThresholdValue.intValue(),
                 ratioThresholdValue == null ? null : ratioThresholdValue.doubleValue(),
+                rs.getString("alert_parking"),
                 rs.getInt("call_enabled") == 1,
                 rs.getString("phone_number"),
                 rs.getString("pending_input_state"),

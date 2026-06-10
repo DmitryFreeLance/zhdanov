@@ -21,6 +21,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -195,6 +196,9 @@ public class ReportCoordinator {
     private List<AlertTrigger> evaluateTriggers(ScrapeResult result, ChatSubscription chat) {
         List<AlertTrigger> triggers = new ArrayList<>();
         for (ReportRow row : result.rows()) {
+            if (!matchesAlertParking(chat.alertParking(), row.parking())) {
+                continue;
+            }
             List<String> reasons = new ArrayList<>();
             if (chat.shkThreshold() != null && chat.shkThreshold() > 0 && row.shk() >= chat.shkThreshold()) {
                 reasons.add("ШК >= " + chat.shkThreshold());
@@ -207,6 +211,17 @@ public class ReportCoordinator {
             }
         }
         return triggers;
+    }
+
+    private boolean matchesAlertParking(String selectedParking, String rowParking) {
+        if (selectedParking == null || selectedParking.isBlank()) {
+            return true;
+        }
+        return normalizeParking(selectedParking).equals(normalizeParking(rowParking));
+    }
+
+    private String normalizeParking(String parking) {
+        return parking == null ? "" : parking.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private boolean isSuppressedByCooldown(String dedupeKey) {

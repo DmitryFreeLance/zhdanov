@@ -33,6 +33,7 @@ public class MaxBotUiService {
                 ⏱️ Автоотчёт: %s
                 🚨 Порог ШК: %s
                 📊 Порог заполнения: %s
+                🅿️ Парковка тревоги: %s
                 ☎️ Дозвон: %s
                 📞 Телефон: %s
 
@@ -42,6 +43,7 @@ public class MaxBotUiService {
                 formatInterval(chat),
                 formatShk(chat),
                 formatRatio(chat),
+                formatAlertParking(chat),
                 chat.callEnabled() ? "включён" : "выключен",
                 formatPhone(chat)
         ).trim();
@@ -114,12 +116,14 @@ public class MaxBotUiService {
 
                 Порог ШК: %s
                 Порог заполнения: %s
+                Парковка: %s
 
                 Для отключения любого порога введите 0.
-                """.formatted(formatShk(chat), formatRatio(chat)).trim();
+                """.formatted(formatShk(chat), formatRatio(chat), formatAlertParking(chat)).trim();
 
         return withKeyboard(text,
                 row(callback("✏️ Изменить ШК", "input:shk"), callback("✏️ Изменить %", "input:ratio")),
+                row(callback("🅿️ Выбрать парковку", "input:parking"), callback("🌐 Все парковки", "parking:clear")),
                 row(callback("🔙 Назад", "menu:main"))
         );
     }
@@ -157,6 +161,7 @@ public class MaxBotUiService {
                 Автоотчёт: %s
                 Порог ШК: %s
                 Порог заполнения: %s
+                Парковка тревоги: %s
                 Дозвон: %s
                 Телефон: %s
                 """.formatted(
@@ -166,6 +171,7 @@ public class MaxBotUiService {
                 formatInterval(chat),
                 formatShk(chat),
                 formatRatio(chat),
+                formatAlertParking(chat),
                 chat.callEnabled() ? "включён" : "выключен",
                 formatPhone(chat)
         ).trim();
@@ -217,6 +223,23 @@ public class MaxBotUiService {
         );
     }
 
+    public MaxOutgoingMessage buildAlertParkingPrompt() {
+        return withKeyboard("""
+                🅿️ Введите название парковки для тревоги.
+
+                Бот будет присылать тревогу только по этой парковке.
+                Название должно совпадать с тем, как парковка называется в отчёте.
+
+                Пример:
+                Парковка 1
+
+                Чтобы вернуть тревоги по всем парковкам, нажмите кнопку ниже.
+                """.trim(),
+                row(callback("🌐 Все парковки", "parking:clear")),
+                row(callback("🔙 Назад", "menu:alert"))
+        );
+    }
+
     public String buildUnknownInputMessage() {
         return "Не понял ввод. Используйте кнопки или отправьте ожидаемое значение.";
     }
@@ -245,6 +268,12 @@ public class MaxBotUiService {
         return threshold == null
                 ? "Порог заполнения отключён."
                 : "Порог заполнения сохранён: " + formatRatioPercent(threshold);
+    }
+
+    public String buildAlertParkingSavedMessage(String parking) {
+        return parking == null || parking.isBlank()
+                ? "Тревога снова настроена на все парковки."
+                : "Тревога настроена на парковку: " + parking;
     }
 
     public String buildIntervalSavedMessage(boolean enabled, int intervalMinutes) {
@@ -350,6 +379,10 @@ public class MaxBotUiService {
 
     private String formatRatio(ChatSubscription chat) {
         return chat.ratioThreshold() == null ? "выключен" : formatRatioPercent(chat.ratioThreshold());
+    }
+
+    private String formatAlertParking(ChatSubscription chat) {
+        return chat.alertParking() == null || chat.alertParking().isBlank() ? "все парковки" : chat.alertParking();
     }
 
     private String formatRatioPercent(double threshold) {
