@@ -140,15 +140,15 @@ public class MaxBotUiService {
                 formatPhone(chat),
                 chat.callEnabled() ? "включён" : "выключен"
         ).trim();
+        String textWithDialHint = hasPhone(chat.phoneNumber())
+                ? text + "\n\nДля звонка используйте номер: " + chat.phoneNumber()
+                : text;
 
         List<List<Map<String, Object>>> rows = new ArrayList<>();
         rows.add(row(callback("✏️ Ввести номер", "input:phone"), callback("🗑 Очистить номер", "phone:clear")));
-        if (hasPhone(chat.phoneNumber())) {
-            rows.add(row(link("📞 Позвонить сейчас", dialUrl(chat.phoneNumber()))));
-        }
         rows.add(row(callback(toggleCallLabel(chat), "call:toggle")));
         rows.add(row(callback("🔙 Назад", "menu:main")));
-        return withKeyboard(text, rows);
+        return withKeyboard(textWithDialHint, rows);
     }
 
     public MaxOutgoingMessage buildStatusMenu(ChatSubscription chat, boolean sessionExists, String mode, int activeChats) {
@@ -365,8 +365,10 @@ public class MaxBotUiService {
         if (!hasPhone(phoneNumber)) {
             return new MaxOutgoingMessage(text);
         }
-        String buttonText = voiceCallEnabled ? "📞 Позвонить повторно" : "📞 Позвонить";
-        return withKeyboard(text, row(link(buttonText, dialUrl(phoneNumber))));
+        String suffix = voiceCallEnabled
+                ? "\n\n📞 Если нужно перезвонить вручную: " + phoneNumber
+                : "\n\n📞 Номер для ручного звонка: " + phoneNumber;
+        return new MaxOutgoingMessage(text + suffix);
     }
 
     private String formatInterval(ChatSubscription chat) {
@@ -457,8 +459,4 @@ public class MaxBotUiService {
         return phoneNumber != null && !phoneNumber.isBlank();
     }
 
-    private String dialUrl(String phoneNumber) {
-        String digits = phoneNumber.replaceAll("[^0-9+]", "");
-        return digits.startsWith("+") ? "tel:" + digits : "tel:+" + digits;
-    }
 }

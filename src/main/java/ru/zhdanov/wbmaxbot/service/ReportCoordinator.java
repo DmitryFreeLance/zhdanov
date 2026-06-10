@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PreDestroy;
 import ru.zhdanov.wbmaxbot.config.AppProperties;
 import ru.zhdanov.wbmaxbot.model.AlertTrigger;
 import ru.zhdanov.wbmaxbot.model.ChatSubscription;
@@ -24,6 +25,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class ReportCoordinator {
@@ -42,6 +47,7 @@ public class ReportCoordinator {
     private final AlertEventRepository alertEventRepository;
     private final ObjectMapper objectMapper;
     private final ZoneId zoneId;
+    private final ExecutorService reportExecutor;
 
     public ReportCoordinator(AppProperties properties,
                              WildberriesScraper wildberriesScraper,
@@ -66,14 +72,29 @@ public class ReportCoordinator {
         this.alertEventRepository = alertEventRepository;
         this.objectMapper = objectMapper;
         this.zoneId = ZoneId.of(properties.getZoneId());
+        this.reportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+            private final AtomicInteger index = new AtomicInteger(1);
+
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "wb-report-" + index.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
     }
 
     public void executeScheduledRun() {
-        executeInternal("scheduler", null);
+        reportExecutor.submit(() -> executeInternal("scheduler", null));
     }
 
     public void executeManualRun(Long chatId) {
-        executeInternal("manual", chatId);
+        reportExecutor.submit(() -> executeInternal("manual", chatId));
+    }
+
+    @PreDestroy
+    public void shutdownExecutor() {
+        reportExecutor.shutdownNow();
     }
 
     public String buildStatusMessage() {
