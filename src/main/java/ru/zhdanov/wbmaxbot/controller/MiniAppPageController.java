@@ -10,4 +10,9 @@ public class MiniAppPageController {
     public String openMiniApp() {
         return "redirect:/miniapp/index.html";
     }
+
+    @GetMapping("/miniapp/export-helper")
+    public String openExportHelper() {
+        return "redirect:/miniapp/export-helper.html";
+    }
 }

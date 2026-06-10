@@ -76,14 +76,14 @@ public class MaxBotUiService {
         List<List<Map<String, Object>>> rows = new ArrayList<>();
         String miniAppDeepLink = buildMiniAppDeepLink();
         if (miniAppDeepLink != null) {
-            rows.add(row(link("🔐 Открыть WB mini app", miniAppDeepLink)));
-            rows.add(row(callback("⌨️ Вход в чате", "wb:auth:start")));
+            rows.add(row(callback("📎 Подключить по номеру", "wb:auth:start")));
+            rows.add(row(link("🌐 Импорт через mini app", miniAppDeepLink)));
         } else {
-            rows.add(row(callback("🔐 Авторизовать WB", "wb:auth:start")));
+            rows.add(row(callback("📎 Подключить по номеру", "wb:auth:start")));
         }
         for (ChatLinkedWbAccount account : accounts) {
             rows.add(row(
-                    callback(account.enabled() ? "⏸️ Пауза " + shortPhone(account.phoneNumber()) : "▶️ Включить " + shortPhone(account.phoneNumber()),
+                    callback(account.enabled() ? "⏸️ Пауза " + shortPhone(account.phoneNumber()) : "✅ Сделать активным " + shortPhone(account.phoneNumber()),
                             "account:toggle:" + account.accountId()),
                     callback("🗑 Убрать", "account:unlink:" + account.accountId())
             ));
@@ -251,7 +251,7 @@ public class MaxBotUiService {
     }
 
     public String buildAccountToggleMessage(boolean enabled, String phoneNumber) {
-        return (enabled ? "Аккаунт включён: " : "Аккаунт поставлен на паузу: ") + maskPhone(phoneNumber);
+        return (enabled ? "Аккаунт сделан активным: " : "Аккаунт поставлен на паузу: ") + maskPhone(phoneNumber);
     }
 
     public String buildAccountUnlinkedMessage(String phoneNumber) {
@@ -260,9 +260,10 @@ public class MaxBotUiService {
 
     public MaxOutgoingMessage buildWbAuthPhonePrompt() {
         return withKeyboard("""
-                🔐 Подключение WB
+                📎 Подключение WB по файлу
 
                 Отправьте номер телефона аккаунта WB.
+                Бот попробует найти готовый файл сессии для этого номера и сразу подключить аккаунт.
 
                 Примеры:
                 +79991234567
@@ -292,6 +293,22 @@ public class MaxBotUiService {
         return "Авторизация WB отменена.";
     }
 
+    public String buildWbAuthFileMissingMessage(String phoneNumber, java.nio.file.Path expectedPath) {
+        return """
+                Не нашёл файл WB-сессии для номера %s.
+
+                Положите файл сюда:
+                %s
+
+                Имя файла лучше сделать по номеру, например:
+                %s
+                """.formatted(
+                maskPhone(phoneNumber),
+                expectedPath.getParent(),
+                expectedPath.getFileName()
+        ).trim();
+    }
+
     public String buildWbAuthStartedMessage(String phoneNumber) {
         return "Запросил код WB для номера " + maskPhone(phoneNumber) + ".";
     }
@@ -309,7 +326,7 @@ public class MaxBotUiService {
     }
 
     public String buildWbAuthSuccessMessage(String phoneNumber) {
-        return "WB аккаунт подключён: " + maskPhone(phoneNumber);
+        return "WB аккаунт подключён и сделан активным: " + maskPhone(phoneNumber);
     }
 
     private String formatInterval(ChatSubscription chat) {

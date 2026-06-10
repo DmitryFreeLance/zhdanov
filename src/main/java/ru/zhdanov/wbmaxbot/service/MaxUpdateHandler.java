@@ -16,14 +16,15 @@ import java.util.concurrent.CompletionException;
 public class MaxUpdateHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MaxUpdateHandler.class);
-    private static final long ADMIN_USER_ID = 188421258L;
-    private static final String ACCESS_DENIED_MESSAGE = "Доступ к боту закрыт. Разрешён только администратор.";
 
     private final MaxMessagingService maxMessagingService;
     private final ReportCoordinator reportCoordinator;
     private final ChatSettingsService chatSettingsService;
     private final WbAccountService wbAccountService;
     private final WbLoginFlowService wbLoginFlowService;
+    private final WbSessionFileService wbSessionFileService;
+    private final WbStorageStateImportService wbStorageStateImportService;
+    private final WildberriesScraper wildberriesScraper;
     private final MaxBotUiService maxBotUiService;
     private final ru.zhdanov.wbmaxbot.config.AppProperties properties;
 
@@ -32,6 +33,9 @@ public class MaxUpdateHandler {
                             ChatSettingsService chatSettingsService,
                             WbAccountService wbAccountService,
                             WbLoginFlowService wbLoginFlowService,
+                            WbSessionFileService wbSessionFileService,
+                            WbStorageStateImportService wbStorageStateImportService,
+                            WildberriesScraper wildberriesScraper,
                             MaxBotUiService maxBotUiService,
                             ru.zhdanov.wbmaxbot.config.AppProperties properties) {
         this.maxMessagingService = maxMessagingService;
@@ -39,6 +43,9 @@ public class MaxUpdateHandler {
         this.chatSettingsService = chatSettingsService;
         this.wbAccountService = wbAccountService;
         this.wbLoginFlowService = wbLoginFlowService;
+        this.wbSessionFileService = wbSessionFileService;
+        this.wbStorageStateImportService = wbStorageStateImportService;
+        this.wildberriesScraper = wildberriesScraper;
         this.maxBotUiService = maxBotUiService;
         this.properties = properties;
     }
@@ -50,28 +57,12 @@ public class MaxUpdateHandler {
 
         switch (updateType) {
             case "bot_started" -> {
-                if (!isAdminUser(userId)) {
-                    denyMessageAccess(chatId, userId, "bot_started");
-                    return;
-                }
                 maxMessagingService.subscribe(chatId, userId, extractTitle(update), extractChatType(update));
                 maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
             }
             case "bot_stopped", "bot_removed", "dialog_removed" -> maxMessagingService.deactivate(chatId);
-            case "message_created" -> {
-                if (!isAdminUser(userId)) {
-                    denyMessageAccess(chatId, userId, "message_created");
-                    return;
-                }
-                handleMessage(chatId, userId, extractTitle(update), extractChatType(update), extractText(update));
-            }
-            case "message_callback" -> {
-                if (!isAdminUser(userId)) {
-                    denyCallbackAccess(chatId, userId, extractCallbackId(update));
-                    return;
-                }
-                handleCallback(chatId, extractCallbackId(update), extractCallbackPayload(update));
-            }
+            case "message_created" -> handleMessage(chatId, userId, extractTitle(update), extractChatType(update), extractText(update));
+            case "message_callback" -> handleCallback(chatId, extractCallbackId(update), extractCallbackPayload(update));
             default -> log.debug("Ignoring MAX update type {}", updateType);
         }
     }
@@ -239,21 +230,7 @@ public class MaxUpdateHandler {
                 }
                 case ChatSettingsService.PENDING_WB_AUTH_PHONE -> {
                     String phone = normalizePhoneNumber(rawText);
-                    chatSettingsService.startPendingWbAuthStarting(chatId, phone);
-                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStartingMessage(phone));
-                    wbLoginFlowService.startAsync(phone)
-                            .whenComplete((startedAuth, error) -> {
-                                try {
-                                    handleStartedWbAuth(chatId, phone, startedAuth, error);
-                                } catch (Exception callbackError) {
-                                    log.error("Failed to finish async WB auth start for chat {}", chatId, callbackError);
-                                    chatSettingsService.clearPendingWbAuth(chatId);
-                                    maxMessagingService.sendToChat(chatId,
-                                            "Не удалось завершить запуск авторизации WB: " + safeMessage(callbackError));
-                                    maxMessagingService.sendToChat(chatId,
-                                            maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
-                                }
-                            });
+                    attachWbAccountFromFile(chatId, phone);
                 }
                 case ChatSettingsService.PENDING_WB_AUTH_STARTING ->
                         maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthStillStartingMessage());
@@ -453,6 +430,21 @@ public class MaxUpdateHandler {
         throw new IllegalArgumentException("Некорректный номер. Отправьте номер в формате +79991234567.");
     }
 
+    private void attachWbAccountFromFile(long chatId, String phoneNumber) {
+        chatSettingsService.clearPendingWbAuth(chatId);
+        String storageStateJson = wbSessionFileService.findStorageStateJson(phoneNumber)
+                .orElseThrow(() -> new IllegalStateException(maxBotUiService.buildWbAuthFileMissingMessage(
+                        phoneNumber,
+                        wbSessionFileService.preferredPath(phoneNumber)
+                )));
+        String normalizedStorageStateJson = wbStorageStateImportService.normalize(storageStateJson);
+        wildberriesScraper.scrapeReport(normalizedStorageStateJson);
+        wbAccountService.attachAccount(chatId, phoneNumber, normalizedStorageStateJson);
+        maxMessagingService.sendToChat(chatId, maxBotUiService.buildWbAuthSuccessMessage(phoneNumber));
+        maxMessagingService.sendToChat(chatId,
+                maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
+    }
+
     private Integer parseShkThreshold(String rawText) {
         try {
             int value = Integer.parseInt(rawText.trim());
@@ -588,22 +580,6 @@ public class MaxUpdateHandler {
             return runtimeException;
         }
         return new IllegalStateException(current == null ? "Ошибка авторизации WB" : current.getMessage(), current);
-    }
-
-    private boolean isAdminUser(Long userId) {
-        return userId != null && userId == ADMIN_USER_ID;
-    }
-
-    private void denyMessageAccess(long chatId, Long userId, String updateType) {
-        log.warn("Denied MAX access for user {} in chat {} on {}", userId, chatId, updateType);
-        if (chatId > 0) {
-            maxMessagingService.sendToChat(chatId, ACCESS_DENIED_MESSAGE);
-        }
-    }
-
-    private void denyCallbackAccess(long chatId, Long userId, String callbackId) {
-        log.warn("Denied MAX callback access for user {} in chat {}", userId, chatId);
-        maxMessagingService.answerCallback(chatId, callbackId, ACCESS_DENIED_MESSAGE, null);
     }
 
     private String safeMessage(Throwable error) {

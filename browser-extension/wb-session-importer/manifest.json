@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "WB Session Importer",
+  "version": "1.0.0",
+  "description": "Импортирует текущую WB-сессию в WB MAX Bot без консоли.",
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": ["https://*/*"],
+  "action": {
+    "default_title": "WB Session Importer",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

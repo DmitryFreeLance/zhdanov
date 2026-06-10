@@ -6,6 +6,7 @@ const codeSection = document.getElementById("codeSection");
 const codeInput = document.getElementById("codeInput");
 const confirmCodeButton = document.getElementById("confirmCodeButton");
 const copyExportScriptButton = document.getElementById("copyExportScriptButton");
+const openExportHelperButton = document.getElementById("openExportHelperButton");
 const storageStateFileInput = document.getElementById("storageStateFileInput");
 const storageStateInput = document.getElementById("storageStateInput");
 const importSessionButton = document.getElementById("importSessionButton");
@@ -75,6 +76,7 @@ async function init() {
   });
 
   sessionToken = session.sessionToken;
+  applyPhoneFromQuery();
   setStatus(`Привет, ${session.firstName}. Можно подключать аккаунты WB или импортировать готовую сессию.`, "success");
   await reloadAccounts();
 }
@@ -163,6 +165,11 @@ copyExportScriptButton.addEventListener("click", async () => {
   } catch (error) {
     setStatus("Не удалось скопировать скрипт автоматически. Разрешите доступ к буферу обмена.", "error");
   }
+});
+
+openExportHelperButton.addEventListener("click", () => {
+  const helperUrl = buildExportHelperUrl(phoneInput.value.trim());
+  window.open(helperUrl, "_blank", "noopener,noreferrer");
 });
 
 confirmCodeButton.addEventListener("click", async () => {
@@ -272,6 +279,25 @@ function renderAccounts(accounts) {
 function setStatus(message, kind = "") {
   statusEl.textContent = message;
   statusEl.className = `status ${kind}`.trim();
+}
+
+function applyPhoneFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const phone = (params.get("phone") || "").trim();
+  if (phone && !phoneInput.value.trim()) {
+    phoneInput.value = phone;
+  }
+}
+
+function buildExportHelperUrl(phoneNumber) {
+  const url = new URL("/miniapp/export-helper", window.location.origin);
+  if (phoneNumber) {
+    url.searchParams.set("phone", phoneNumber);
+  }
+  if (sessionToken) {
+    url.searchParams.set("sessionToken", sessionToken);
+  }
+  return url.toString();
 }
 
 async function api(url, options = {}) {

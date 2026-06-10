@@ -127,6 +127,18 @@ button.ghost {
     gap: 8px;
 }
 
+.helper-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.helper-line {
+    color: #344054;
+    margin-bottom: 8px;
+}
+
 .account {
     display: grid;
     gap: 12px;

@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,7 +29,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequestMapping("/api/miniapp")
 public class MiniAppApiController {
 
-    private static final long ADMIN_USER_ID = 188421258L;
     private final Map<Long, Boolean> authStartsInFlight = new ConcurrentHashMap<>();
 
     private final MaxMiniAppAuthService maxMiniAppAuthService;
@@ -58,7 +58,6 @@ public class MiniAppApiController {
     @PostMapping("/session")
     public ResponseEntity<Map<String, Object>> createSession(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = maxMiniAppAuthService.validate(payload.get("initData"));
-        requireAdmin(principal);
         maxMessagingService.subscribe(principal.chatId(), principal.userId(), "MAX chat " + principal.chatId(), "dialog");
         String sessionToken = miniAppSessionService.create(principal);
         return ResponseEntity.ok(Map.of(
@@ -73,7 +72,6 @@ public class MiniAppApiController {
     @GetMapping("/state")
     public ResponseEntity<Map<String, Object>> getState(@RequestParam("sessionToken") String sessionToken) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(sessionToken);
-        requireAdmin(principal);
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "accounts", wbAccountService.listAccounts(principal.chatId())
@@ -83,7 +81,6 @@ public class MiniAppApiController {
     @PostMapping("/wb-auth/start")
     public ResponseEntity<Map<String, Object>> startAuth(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
-        requireAdmin(principal);
         if (authStartsInFlight.putIfAbsent(principal.chatId(), Boolean.TRUE) != null) {
             throw new IllegalStateException("Авторизация WB уже запускается. Подождите несколько секунд.");
         }
@@ -104,7 +101,6 @@ public class MiniAppApiController {
     @PostMapping("/wb-auth/confirm")
     public ResponseEntity<Map<String, Object>> confirmAuth(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
-        requireAdmin(principal);
         String storageStateJson = wbLoginFlowService.confirm(payload.get("flowId"), payload.get("code"));
         wbAccountService.attachAccount(principal.chatId(), payload.get("phoneNumber"), storageStateJson);
         return ResponseEntity.ok(Map.of(
@@ -116,33 +112,20 @@ public class MiniAppApiController {
     @PostMapping("/wb-auth/import")
     public ResponseEntity<Map<String, Object>> importAuth(@RequestBody Map<String, String> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
-        requireAdmin(principal);
+        return importStorageState(principal, payload.get("phoneNumber"), payload.get("storageStateJson"));
+    }
 
-        String phoneNumber = payload.get("phoneNumber");
-        String storageStateJson = payload.get("storageStateJson");
-        if (phoneNumber == null || phoneNumber.isBlank()) {
-            throw new IllegalArgumentException("Введите телефон WB для привязки аккаунта.");
-        }
-        if (storageStateJson == null || storageStateJson.isBlank()) {
-            throw new IllegalArgumentException("Пришлите JSON storage state из браузера.");
-        }
-
-        String normalizedStorageStateJson = wbStorageStateImportService.normalize(storageStateJson);
-        wildberriesScraper.scrapeReport(normalizedStorageStateJson);
-        wbAccountService.attachAccount(principal.chatId(), phoneNumber, normalizedStorageStateJson);
-
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "WB-сессия проверена и подключена.",
-                "accounts", wbAccountService.listAccounts(principal.chatId())
-        ));
+    @CrossOrigin(origins = "*")
+    @PostMapping("/wb-auth/import-external")
+    public ResponseEntity<Map<String, Object>> importAuthExternal(@RequestBody Map<String, String> payload) {
+        MiniAppPrincipal principal = miniAppSessionService.getRequired(payload.get("sessionToken"));
+        return importStorageState(principal, payload.get("phoneNumber"), payload.get("storageStateJson"));
     }
 
     @PostMapping("/accounts/{accountId}/enabled")
     public ResponseEntity<Map<String, Object>> updateEnabled(@PathVariable long accountId,
                                                              @RequestBody Map<String, Object> payload) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired((String) payload.get("sessionToken"));
-        requireAdmin(principal);
         boolean enabled = Boolean.TRUE.equals(payload.get("enabled"));
         wbAccountService.setEnabled(principal.chatId(), accountId, enabled);
         return ResponseEntity.ok(Map.of(
@@ -155,7 +138,6 @@ public class MiniAppApiController {
     public ResponseEntity<Map<String, Object>> unlinkAccount(@PathVariable long accountId,
                                                              @RequestParam("sessionToken") String sessionToken) {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(sessionToken);
-        requireAdmin(principal);
         wbAccountService.unlink(principal.chatId(), accountId);
         return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -179,9 +161,24 @@ public class MiniAppApiController {
         ));
     }
 
-    private void requireAdmin(MiniAppPrincipal principal) {
-        if (principal.userId() != ADMIN_USER_ID) {
-            throw new IllegalArgumentException("Доступ к mini app закрыт. Разрешён только администратор.");
+    private ResponseEntity<Map<String, Object>> importStorageState(MiniAppPrincipal principal,
+                                                                   String phoneNumber,
+                                                                   String storageStateJson) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new IllegalArgumentException("Введите телефон WB для привязки аккаунта.");
         }
+        if (storageStateJson == null || storageStateJson.isBlank()) {
+            throw new IllegalArgumentException("Пришлите JSON storage state из браузера.");
+        }
+
+        String normalizedStorageStateJson = wbStorageStateImportService.normalize(storageStateJson);
+        wildberriesScraper.scrapeReport(normalizedStorageStateJson);
+        wbAccountService.attachAccount(principal.chatId(), phoneNumber, normalizedStorageStateJson);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "WB-сессия проверена и подключена.",
+                "accounts", wbAccountService.listAccounts(principal.chatId())
+        ));
     }
 }

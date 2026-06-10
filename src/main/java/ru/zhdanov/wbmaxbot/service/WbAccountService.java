@@ -40,6 +40,7 @@ public class WbAccountService {
     public ChatLinkedWbAccount attachAccount(long chatId, String phoneNumber, String storageStateJson) {
         OffsetDateTime now = now();
         WbAccount account = wbAccountRepository.upsertConnected(phoneNumber, storageStateJson, now);
+        chatWbAccountRepository.disableAllForChat(chatId, now);
         chatWbAccountRepository.linkAccount(chatId, account.id(), now);
         return listAccounts(chatId).stream()
                 .filter(item -> item.accountId() == account.id())
@@ -48,7 +49,11 @@ public class WbAccountService {
     }
 
     public void setEnabled(long chatId, long accountId, boolean enabled) {
-        chatWbAccountRepository.updateEnabled(chatId, accountId, enabled, now());
+        OffsetDateTime now = now();
+        if (enabled) {
+            chatWbAccountRepository.disableAllForChat(chatId, now);
+        }
+        chatWbAccountRepository.updateEnabled(chatId, accountId, enabled, now);
     }
 
     public void unlink(long chatId, long accountId) {

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WB Session Importer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 14px;
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f8fafc;
+      color: #111827;
+    }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+    .status {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .status.error {
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+    .status.success {
+      background: #ecfdf3;
+      color: #047857;
+    }
+    .meta {
+      display: grid;
+      gap: 6px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #475569;
+    }
+    button {
+      width: 100%;
+      margin-top: 12px;
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      background: #111827;
+      color: #fff;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <strong>WB Session Importer</strong>
+    <div id="status" class="status">Открой helper из mini app, затем страницу WB и нажмите кнопку ниже.</div>
+    <div class="meta">
+      <div>Номер: <span id="phone">не задан</span></div>
+      <div>Бот: <span id="origin">не задан</span></div>
+    </div>
+    <button id="importButton" type="button">Импортировать текущую WB-сессию</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

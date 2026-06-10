@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WB Export Helper</title>
+    <link rel="stylesheet" href="/miniapp/styles.css">
+</head>
+<body>
+<main class="app">
+    <section class="card">
+        <h1>WB Export Helper</h1>
+        <p class="muted">Быстрый помощник для входа в обычном браузере и экспорта WB-сессии в бот.</p>
+        <div id="helperStatus" class="status">Подготавливаю помощник…</div>
+    </section>
+
+    <section class="card">
+        <h2>Шаги</h2>
+        <div class="helper-box">
+            <div class="helper-line"><strong>Номер:</strong> <span id="helperPhone">не передан</span></div>
+            <div class="helper-line"><strong>WB:</strong> <a href="https://logistics.wildberries.ru/" target="_blank" rel="noreferrer">https://logistics.wildberries.ru/</a></div>
+        </div>
+        <div class="helper-actions">
+            <button id="copyAndOpenButton" class="primary" type="button">Скопировать скрипт и открыть WB</button>
+            <button id="copyOnlyButton" class="ghost" type="button">Только скопировать скрипт</button>
+        </div>
+        <div class="helper-box">
+            <div class="helper-head">
+                <strong>Без консоли</strong>
+            </div>
+            <p class="muted">Если установить небольшое Chromium-расширение из проекта, дальше на странице WB будет одна кнопка импорта без консоли и без ручной вставки JSON.</p>
+            <p class="muted">Папка расширения: <code>browser-extension/wb-session-importer</code></p>
+        </div>
+        <ol class="helper-steps">
+            <li>Нажмите кнопку выше.</li>
+            <li>В новом окне войдите в WB под нужным номером.</li>
+            <li>На странице WB откройте консоль браузера и вставьте скрипт.</li>
+            <li>Скрипт скопирует JSON WB-сессии. Вернитесь в mini app и вставьте его в импорт.</li>
+        </ol>
+    </section>
+</main>
+
+<script type="module" src="/miniapp/export-helper.js"></script>
+</body>
+</html>

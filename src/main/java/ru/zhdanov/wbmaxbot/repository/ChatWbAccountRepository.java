@@ -74,6 +74,17 @@ public class ChatWbAccountRepository {
         );
     }
 
+    public void disableAllForChat(long chatId, OffsetDateTime now) {
+        jdbcTemplate.update("""
+                update chat_wb_account
+                set enabled = 0, updated_at = ?
+                where chat_id = ?
+                """,
+                now.toString(),
+                chatId
+        );
+    }
+
     public void unlink(long chatId, long accountId) {
         jdbcTemplate.update("""
                 delete from chat_wb_account
