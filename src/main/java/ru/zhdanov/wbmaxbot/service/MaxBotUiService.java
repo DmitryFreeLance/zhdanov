@@ -361,6 +361,10 @@ public class MaxBotUiService {
         return "WB аккаунт подключён и сделан активным: " + maskPhone(phoneNumber);
     }
 
+    public MaxOutgoingMessage buildErrorMessage(String text) {
+        return withKeyboard(text, row(callback("🔙 В меню", "menu:main")));
+    }
+
     public MaxOutgoingMessage buildAlertMessage(String text, String phoneNumber, boolean voiceCallEnabled) {
         if (!hasPhone(phoneNumber)) {
             return new MaxOutgoingMessage(text);

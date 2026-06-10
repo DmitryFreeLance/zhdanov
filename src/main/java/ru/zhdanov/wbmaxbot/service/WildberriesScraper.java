@@ -76,10 +76,14 @@ public class WildberriesScraper {
                         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                         """);
                 Page page = context.newPage();
-                page.navigate(properties.getWildberries().getReportUrl(),
-                        new Page.NavigateOptions()
-                                .setTimeout(timeoutMs())
-                                .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+                try {
+                    page.navigate(properties.getWildberries().getReportUrl(),
+                            new Page.NavigateOptions()
+                                    .setTimeout(timeoutMs())
+                                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+                } catch (RuntimeException e) {
+                    throw new IllegalStateException(buildNavigationTimeoutMessage(page), e);
+                }
                 waitForReport(page, properties.getWildberries().getTimeout().toMillis());
 
                 if (page.url().contains("/auth/login")) {
@@ -189,6 +193,13 @@ public class WildberriesScraper {
                 + ". Title: " + blankFallback(title)
                 + ". Heading: " + blankFallback(heading)
                 + ". Screen: " + blankFallback(bodyText)).trim();
+    }
+
+    private String buildNavigationTimeoutMessage(Page page) {
+        String url = safePageValue(page, Page::url);
+        String title = safeEvaluate(page, "() => document.title");
+        return ("WB report page did not open in time. URL: " + blankFallback(url)
+                + ". Title: " + blankFallback(title)).trim();
     }
 
     private String safePageValue(Page page, java.util.function.Function<Page, String> extractor) {

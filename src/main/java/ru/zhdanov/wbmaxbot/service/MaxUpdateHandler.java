@@ -254,12 +254,12 @@ public class MaxUpdateHandler {
                 case ChatSettingsService.PENDING_WB_AUTH_CODE -> confirmWbAuthCode(chat, rawText);
                 default -> {
                     chatSettingsService.clearPendingInputState(chatId);
-                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildUnknownInputMessage());
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage(maxBotUiService.buildUnknownInputMessage()));
                     maxMessagingService.sendToChat(chatId, buildMainMenu(chatId));
                 }
             }
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            maxMessagingService.sendToChat(chatId, e.getMessage());
+        } catch (RuntimeException e) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage(safeMessage(e)));
         }
     }
 
@@ -357,7 +357,7 @@ public class MaxUpdateHandler {
                     chatId, stillWaitingForStart, latestChat.pendingInputState());
             if (stillWaitingForStart) {
                 chatSettingsService.clearPendingWbAuth(chatId);
-                maxMessagingService.sendToChat(chatId, safeMessage(unwrapCompletionError(error)));
+                maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage(safeMessage(unwrapCompletionError(error))));
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
             }

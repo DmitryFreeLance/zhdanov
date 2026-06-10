@@ -144,7 +144,9 @@ public class ReportCoordinator {
                         reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", accountError.getMessage());
                         if (manualChatId != null) {
                             maxMessagingService.sendToChat(chat.chatId(),
-                                    "Не удалось получить отчёт для аккаунта " + maskPhone(account.phoneNumber()) + ": " + accountError.getMessage());
+                                    maxBotUiService.buildErrorMessage(
+                                            "Не удалось получить отчёт для аккаунта " + maskPhone(account.phoneNumber()) + ": " + accountError.getMessage()
+                                    ));
                         }
                     }
                 }
@@ -157,7 +159,7 @@ public class ReportCoordinator {
             log.error("Report execution failed", e);
             reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", e.getMessage());
             if (manualChatId != null) {
-                maxMessagingService.sendToChat(manualChatId, "Не удалось получить отчёт WB: " + e.getMessage());
+                maxMessagingService.sendToChat(manualChatId, maxBotUiService.buildErrorMessage("Не удалось получить отчёт WB: " + e.getMessage()));
             }
         }
     }
