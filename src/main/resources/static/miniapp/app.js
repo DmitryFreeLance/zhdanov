@@ -1,10 +1,6 @@
 const statusEl = document.getElementById("status");
 const accountsEl = document.getElementById("accounts");
 const phoneInput = document.getElementById("phoneInput");
-const startAuthButton = document.getElementById("startAuthButton");
-const codeSection = document.getElementById("codeSection");
-const codeInput = document.getElementById("codeInput");
-const confirmCodeButton = document.getElementById("confirmCodeButton");
 const copyExportScriptButton = document.getElementById("copyExportScriptButton");
 const openExportHelperButton = document.getElementById("openExportHelperButton");
 const storageStateFileInput = document.getElementById("storageStateFileInput");
@@ -13,10 +9,6 @@ const importSessionButton = document.getElementById("importSessionButton");
 const refreshButton = document.getElementById("refreshButton");
 
 let sessionToken = null;
-let pendingFlowId = null;
-let pendingPhoneNumber = null;
-let startAuthInFlight = false;
-let confirmAuthInFlight = false;
 let importSessionInFlight = false;
 
 const WB_EXPORT_SCRIPT = String.raw`(() => {
@@ -77,37 +69,9 @@ async function init() {
 
   sessionToken = session.sessionToken;
   applyPhoneFromQuery();
-  setStatus(`Привет, ${session.firstName}. Можно подключать аккаунты WB или импортировать готовую сессию.`, "success");
+  setStatus(`Привет, ${session.firstName}. Подключайте аккаунты WB через импорт готовой сессии.`, "success");
   await reloadAccounts();
 }
-
-startAuthButton.addEventListener("click", async () => {
-  if (startAuthInFlight) {
-    return;
-  }
-  try {
-    const phoneNumber = phoneInput.value.trim();
-    if (!phoneNumber) {
-      throw new Error("Введите телефон WB.");
-    }
-    startAuthInFlight = true;
-    startAuthButton.disabled = true;
-    setStatus("Запрашиваю код у WB…");
-    const result = await api("/api/miniapp/wb-auth/start", {
-      method: "POST",
-      body: JSON.stringify({ sessionToken, phoneNumber }),
-    });
-    pendingFlowId = result.flowId;
-    pendingPhoneNumber = result.phoneNumber;
-    codeSection.classList.remove("hidden");
-    setStatus(result.message || "Код отправлен. Введите его ниже.", "success");
-  } catch (error) {
-    setStatus(error.message, "error");
-  } finally {
-    startAuthInFlight = false;
-    startAuthButton.disabled = false;
-  }
-});
 
 storageStateFileInput.addEventListener("change", async (event) => {
   const [file] = event.target.files || [];
@@ -170,44 +134,6 @@ copyExportScriptButton.addEventListener("click", async () => {
 openExportHelperButton.addEventListener("click", () => {
   const helperUrl = buildExportHelperUrl(phoneInput.value.trim());
   window.open(helperUrl, "_blank", "noopener,noreferrer");
-});
-
-confirmCodeButton.addEventListener("click", async () => {
-  if (confirmAuthInFlight) {
-    return;
-  }
-  try {
-    const code = codeInput.value.trim();
-    if (!pendingFlowId || !pendingPhoneNumber) {
-      throw new Error("Сначала запросите код.");
-    }
-    if (!code) {
-      throw new Error("Введите код из SMS.");
-    }
-    confirmAuthInFlight = true;
-    confirmCodeButton.disabled = true;
-    setStatus("Подтверждаю код и сохраняю сессию WB…");
-    const result = await api("/api/miniapp/wb-auth/confirm", {
-      method: "POST",
-      body: JSON.stringify({
-        sessionToken,
-        flowId: pendingFlowId,
-        code,
-        phoneNumber: pendingPhoneNumber,
-      }),
-    });
-    pendingFlowId = null;
-    pendingPhoneNumber = null;
-    codeInput.value = "";
-    codeSection.classList.add("hidden");
-    setStatus("Аккаунт подключён.", "success");
-    renderAccounts(result.accounts || []);
-  } catch (error) {
-    setStatus(error.message, "error");
-  } finally {
-    confirmAuthInFlight = false;
-    confirmCodeButton.disabled = false;
-  }
 });
 
 refreshButton.addEventListener("click", async () => {

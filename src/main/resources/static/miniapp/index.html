@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WB Авторизация</title>
+    <title>WB Подключение</title>
     <link rel="stylesheet" href="/miniapp/styles.css">
     <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -21,20 +21,12 @@
             Телефон
             <input id="phoneInput" type="tel" placeholder="+79991234567">
         </label>
-        <button id="startAuthButton" class="primary">Получить код</button>
-
-        <div id="codeSection" class="hidden">
-            <label>
-                Код из SMS
-                <input id="codeInput" type="text" inputmode="numeric" placeholder="123456">
-            </label>
-            <button id="confirmCodeButton" class="primary">Подтвердить вход</button>
-        </div>
+        <p class="muted">Номер нужен, чтобы бот нашёл и привязал нужную WB-сессию к этому чату.</p>
     </section>
 
     <section class="card">
         <h2>Импорт готовой сессии</h2>
-        <p class="muted">Если WB режет отправку кода с сервера, можно войти в обычном браузере и загрузить сюда готовый <code>storageState.json</code>.</p>
+        <p class="muted">Войдите в <code>wb.logistics</code> в обычном браузере и загрузите сюда готовый <code>storageState.json</code>.</p>
         <div class="helper-box">
             <div class="helper-head">
                 <strong>Упрощённый способ</strong>
