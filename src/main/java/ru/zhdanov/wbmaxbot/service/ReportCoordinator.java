@@ -127,17 +127,26 @@ public class ReportCoordinator {
                 }
 
                 for (ChatLinkedWbAccount account : accounts) {
-                    ScrapeResult result = wildberriesScraper.scrapeReport(account.storageStateJson());
-                    List<String> reportMessages = notificationFormatter.buildReportMessages(
-                            result,
-                            properties.getAlert().getMaxRowsInMessage(),
-                            maskPhone(account.phoneNumber())
-                    );
-                    Map<String, String> messageStatuses = sendReportMessages(chat, account, reportMessages, manualChatId == null, result.scrapedAt());
-                    long runId = reportRepository.saveSuccessfulRun(result, source, toJson(result.summary()), String.join("\n\n---\n\n", reportMessages));
-                    log.info("Stored report run {} for chat {} and account {}", runId, chat.chatId(), account.accountId());
-                    processAlerts(result, chat, account, messageStatuses);
-                    sentAny = true;
+                    try {
+                        ScrapeResult result = wildberriesScraper.scrapeReport(account.storageStateJson());
+                        List<String> reportMessages = notificationFormatter.buildReportMessages(
+                                result,
+                                properties.getAlert().getMaxRowsInMessage(),
+                                maskPhone(account.phoneNumber())
+                        );
+                        Map<String, String> messageStatuses = sendReportMessages(chat, account, reportMessages, manualChatId == null, result.scrapedAt());
+                        long runId = reportRepository.saveSuccessfulRun(result, source, toJson(result.summary()), String.join("\n\n---\n\n", reportMessages));
+                        log.info("Stored report run {} for chat {} and account {}", runId, chat.chatId(), account.accountId());
+                        processAlerts(result, chat, account, messageStatuses);
+                        sentAny = true;
+                    } catch (Exception accountError) {
+                        log.error("Report execution failed for chat {} and account {}", chat.chatId(), account.accountId(), accountError);
+                        reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", accountError.getMessage());
+                        if (manualChatId != null) {
+                            maxMessagingService.sendToChat(chat.chatId(),
+                                    "Не удалось получить отчёт для аккаунта " + maskPhone(account.phoneNumber()) + ": " + accountError.getMessage());
+                        }
+                    }
                 }
             }
 

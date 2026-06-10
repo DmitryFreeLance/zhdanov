@@ -149,7 +149,7 @@ public class WildberriesScraper {
             }
             page.waitForTimeout(1000);
         }
-        throw new IllegalStateException("Timed out waiting for WB report table");
+        throw new IllegalStateException(buildReportTimeoutMessage(page));
     }
 
     private int count(Page page, String selector) {
@@ -173,6 +173,43 @@ public class WildberriesScraper {
                 || message.contains("Most likely the page has been closed")
                 || message.contains("Target page, context or browser has been closed")
                 || message.contains("Cannot find context with specified id");
+    }
+
+    private String buildReportTimeoutMessage(Page page) {
+        String url = safePageValue(page, Page::url);
+        String title = safeEvaluate(page, "() => document.title");
+        String heading = safeEvaluate(page, "() => document.querySelector('h1, h2')?.textContent || ''");
+        String bodyText = safeEvaluate(page, """
+                () => (document.body?.innerText || '')
+                  .replace(/\\s+/g, ' ')
+                  .trim()
+                  .slice(0, 500)
+                """);
+        return ("Timed out waiting for WB report table. URL: " + blankFallback(url)
+                + ". Title: " + blankFallback(title)
+                + ". Heading: " + blankFallback(heading)
+                + ". Screen: " + blankFallback(bodyText)).trim();
+    }
+
+    private String safePageValue(Page page, java.util.function.Function<Page, String> extractor) {
+        try {
+            return extractor.apply(page);
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
+    private String safeEvaluate(Page page, String script) {
+        try {
+            Object value = page.evaluate(script);
+            return value == null ? "" : String.valueOf(value).trim();
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
+    private String blankFallback(String value) {
+        return value == null || value.isBlank() ? "-" : value;
     }
 
     private ScrapeResult parseScrapeResult(String json) {
