@@ -20,7 +20,7 @@ public class AppProperties {
     private String mode = "run";
 
     @NotBlank
-    private String zoneId = "Asia/Novosibirsk";
+    private String zoneId = "Asia/Yekaterinburg";
 
     @NotNull
     private Path databasePath = Path.of("./data/wb-max-bot.db");

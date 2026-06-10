@@ -137,11 +137,14 @@ public class MaxBotUiService {
                 chat.callEnabled() ? "включён" : "выключен"
         ).trim();
 
-        return withKeyboard(text,
-                row(callback("✏️ Ввести номер", "input:phone"), callback("🗑 Очистить номер", "phone:clear")),
-                row(callback(toggleCallLabel(chat), "call:toggle")),
-                row(callback("🔙 Назад", "menu:main"))
-        );
+        List<List<Map<String, Object>>> rows = new ArrayList<>();
+        rows.add(row(callback("✏️ Ввести номер", "input:phone"), callback("🗑 Очистить номер", "phone:clear")));
+        if (hasPhone(chat.phoneNumber())) {
+            rows.add(row(link("📞 Позвонить сейчас", dialUrl(chat.phoneNumber()))));
+        }
+        rows.add(row(callback(toggleCallLabel(chat), "call:toggle")));
+        rows.add(row(callback("🔙 Назад", "menu:main")));
+        return withKeyboard(text, rows);
     }
 
     public MaxOutgoingMessage buildStatusMenu(ChatSubscription chat, boolean sessionExists, String mode, int activeChats) {
@@ -329,6 +332,14 @@ public class MaxBotUiService {
         return "WB аккаунт подключён и сделан активным: " + maskPhone(phoneNumber);
     }
 
+    public MaxOutgoingMessage buildAlertMessage(String text, String phoneNumber, boolean voiceCallEnabled) {
+        if (!hasPhone(phoneNumber)) {
+            return new MaxOutgoingMessage(text);
+        }
+        String buttonText = voiceCallEnabled ? "📞 Позвонить повторно" : "📞 Позвонить";
+        return withKeyboard(text, row(link(buttonText, dialUrl(phoneNumber))));
+    }
+
     private String formatInterval(ChatSubscription chat) {
         return chat.autoReportEnabled() ? "каждые " + chat.reportIntervalMinutes() + " минут" : "выключен";
     }
@@ -407,5 +418,14 @@ public class MaxBotUiService {
             return phoneNumber;
         }
         return "+" + digits.charAt(0) + "***" + digits.substring(digits.length() - 4);
+    }
+
+    private boolean hasPhone(String phoneNumber) {
+        return phoneNumber != null && !phoneNumber.isBlank();
+    }
+
+    private String dialUrl(String phoneNumber) {
+        String digits = phoneNumber.replaceAll("[^0-9+]", "");
+        return digits.startsWith("+") ? "tel:" + digits : "tel:+" + digits;
     }
 }

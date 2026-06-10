@@ -32,6 +32,7 @@ public class ReportCoordinator {
     private final AppProperties properties;
     private final WildberriesScraper wildberriesScraper;
     private final NotificationFormatter notificationFormatter;
+    private final MaxBotUiService maxBotUiService;
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
     private final ChatSettingsService chatSettingsService;
@@ -44,6 +45,7 @@ public class ReportCoordinator {
     public ReportCoordinator(AppProperties properties,
                              WildberriesScraper wildberriesScraper,
                              NotificationFormatter notificationFormatter,
+                             MaxBotUiService maxBotUiService,
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
                              ChatSettingsService chatSettingsService,
@@ -54,6 +56,7 @@ public class ReportCoordinator {
         this.properties = properties;
         this.wildberriesScraper = wildberriesScraper;
         this.notificationFormatter = notificationFormatter;
+        this.maxBotUiService = maxBotUiService;
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
         this.chatSettingsService = chatSettingsService;
@@ -163,7 +166,10 @@ public class ReportCoordinator {
 
             boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled() && chat.callEnabled();
             String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled, maskPhone(account.phoneNumber()));
-            String messageStatus = maxMessagingService.sendToChat(chat.chatId(), alertMessage);
+            String messageStatus = maxMessagingService.sendToChat(
+                    chat.chatId(),
+                    maxBotUiService.buildAlertMessage(alertMessage, chat.phoneNumber(), voiceCallEnabled)
+            );
             VoiceCallResult callResult = voiceCallEnabled
                     ? voiceAlertService.callTarget(chat.phoneNumber(), notificationFormatter.buildVoiceText(trigger))
                     : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
