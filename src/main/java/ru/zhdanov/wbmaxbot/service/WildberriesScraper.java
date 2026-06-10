@@ -111,7 +111,7 @@ public class WildberriesScraper {
 
                 long deadline = System.currentTimeMillis() + properties.getWildberries().getBootstrapTimeout().toMillis();
                 while (System.currentTimeMillis() < deadline) {
-                    if (page.url().contains("/reports/remainders/last-mile/chart") && page.locator("table").count() > 0) {
+                    if (page.url().contains("/reports/remainders/last-mile/chart") && count(page, "table") > 0) {
                         context.storageState(new BrowserContext.StorageStateOptions().setPath(storageStatePath));
                         log.info("WB session saved to {}", storageStatePath.toAbsolutePath());
                         return storageStatePath;
@@ -144,12 +144,35 @@ public class WildberriesScraper {
             if (page.url().contains("/auth/login")) {
                 return;
             }
-            if (page.locator("table").count() > 0 && page.locator("h1").count() > 0) {
+            if (count(page, "table") > 0 && count(page, "h1") > 0) {
                 return;
             }
             page.waitForTimeout(1000);
         }
         throw new IllegalStateException("Timed out waiting for WB report table");
+    }
+
+    private int count(Page page, String selector) {
+        try {
+            return page.locator(selector).count();
+        } catch (RuntimeException e) {
+            if (isTransientPlaywrightNavigationError(e)) {
+                log.debug("Ignoring transient Playwright navigation error while counting '{}': {}", selector, e.getMessage());
+                return 0;
+            }
+            throw e;
+        }
+    }
+
+    private boolean isTransientPlaywrightNavigationError(RuntimeException error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        return message.contains("Execution context was destroyed")
+                || message.contains("Most likely the page has been closed")
+                || message.contains("Target page, context or browser has been closed")
+                || message.contains("Cannot find context with specified id");
     }
 
     private ScrapeResult parseScrapeResult(String json) {

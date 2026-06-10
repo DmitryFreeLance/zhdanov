@@ -26,9 +26,7 @@ TARGET_PATH="${TARGET_DIR}/${DIGITS}.json"
 
 mkdir -p "${TARGET_DIR}"
 
-if [[ ! -f "${ROOT_DIR}/target/wb-max-bot-1.0.0.jar" ]]; then
-  (cd "${ROOT_DIR}" && mvn -q -DskipTests package)
-fi
+(cd "${ROOT_DIR}" && mvn -q -DskipTests package)
 
 echo "Opening real browser for WB login..."
 echo "Phone: +${DIGITS}"
