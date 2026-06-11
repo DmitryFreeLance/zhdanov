@@ -10,6 +10,9 @@ const refreshButton = document.getElementById("refreshButton");
 
 let sessionToken = null;
 let importSessionInFlight = false;
+const SESSION_TOKEN_STORAGE_KEY = "wb-miniapp-session-token";
+
+setMiniAppReady(false);
 
 const WB_EXPORT_SCRIPT = String.raw`(() => {
   const cookies = Object.fromEntries(
@@ -58,19 +61,29 @@ init().catch((error) => {
 async function init() {
   window.WebApp?.ready?.();
   const initData = window.WebApp?.initData;
-  if (!initData) {
-    throw new Error("Mini app нужно открывать из MAX.");
+  const browserSessionToken = getSessionTokenFromUrl() || loadStoredSessionToken();
+
+  if (initData) {
+    const session = await api("/api/miniapp/session", {
+      method: "POST",
+      body: JSON.stringify({ initData }),
+    });
+    sessionToken = session.sessionToken;
+    persistSessionToken(sessionToken);
+    syncSessionTokenInUrl(sessionToken);
+  } else if (browserSessionToken) {
+    sessionToken = browserSessionToken;
+    persistSessionToken(sessionToken);
+    syncSessionTokenInUrl(sessionToken);
+  } else {
+    throw new Error("Откройте mini app из MAX хотя бы один раз или используйте прямую ссылку с sessionToken.");
   }
 
-  const session = await api("/api/miniapp/session", {
-    method: "POST",
-    body: JSON.stringify({ initData }),
-  });
-
-  sessionToken = session.sessionToken;
   applyPhoneFromQuery();
-  setStatus(`Привет, ${session.firstName}. Введите номер, откройте WB Logistics на ноутбуке или ПК, вставьте скрипт в консоль и потом импортируйте JSON сюда.`, "success");
-  await reloadAccounts();
+  setMiniAppReady(true);
+  const state = await reloadAccounts();
+  const firstName = state.firstName || "пользователь";
+  setStatus(`Привет, ${firstName}. Введите номер, откройте WB Logistics на ноутбуке или ПК, вставьте скрипт в консоль и потом импортируйте JSON сюда.`, "success");
 }
 
 storageStateFileInput.addEventListener("change", async (event) => {
@@ -93,6 +106,9 @@ importSessionButton.addEventListener("click", async () => {
   try {
     const phoneNumber = phoneInput.value.trim();
     const storageStateJson = storageStateInput.value.trim();
+    if (!sessionToken) {
+      throw new Error("Сессия mini app не инициализировалась. Закройте и заново откройте mini app из MAX.");
+    }
     if (!phoneNumber) {
       throw new Error("Введите телефон WB.");
     }
@@ -147,6 +163,7 @@ refreshButton.addEventListener("click", async () => {
 async function reloadAccounts() {
   const result = await api(`/api/miniapp/state?sessionToken=${encodeURIComponent(sessionToken)}`);
   renderAccounts(result.accounts || []);
+  return result;
 }
 
 function renderAccounts(accounts) {
@@ -224,6 +241,49 @@ function buildExportHelperUrl(phoneNumber) {
     url.searchParams.set("sessionToken", sessionToken);
   }
   return url.toString();
+}
+
+function setMiniAppReady(ready) {
+  importSessionButton.disabled = !ready || importSessionInFlight;
+  copyExportScriptButton.disabled = !ready;
+  openExportHelperButton.disabled = !ready;
+  refreshButton.disabled = !ready;
+}
+
+function getSessionTokenFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return (params.get("sessionToken") || "").trim();
+}
+
+function persistSessionToken(token) {
+  if (!token) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token);
+  } catch (_) {
+    // ignore storage errors
+  }
+}
+
+function loadStoredSessionToken() {
+  try {
+    return (window.localStorage.getItem(SESSION_TOKEN_STORAGE_KEY) || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function syncSessionTokenInUrl(token) {
+  if (!token) {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("sessionToken") === token) {
+    return;
+  }
+  url.searchParams.set("sessionToken", token);
+  window.history.replaceState({}, "", url.toString());
 }
 
 async function api(url, options = {}) {

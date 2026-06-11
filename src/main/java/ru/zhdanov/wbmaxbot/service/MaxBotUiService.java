@@ -68,7 +68,7 @@ public class MaxBotUiService {
         } else {
             for (ChatLinkedWbAccount account : accounts) {
                 text.append("\n")
-                        .append(account.enabled() ? "✅ " : "⏸️ ")
+                        .append(account.enabled() ? "✅ " : "❌ ")
                         .append(maskPhone(account.phoneNumber()))
                         .append(" • ")
                         .append(account.status() == null ? "CONNECTED" : account.status());
@@ -85,7 +85,7 @@ public class MaxBotUiService {
         }
         for (ChatLinkedWbAccount account : accounts) {
             rows.add(row(
-                    callback(account.enabled() ? "⏸️ Пауза " + shortPhone(account.phoneNumber()) : "✅ Сделать активным " + shortPhone(account.phoneNumber()),
+                    callback((account.enabled() ? "✅ " : "❌ ") + shortPhone(account.phoneNumber()),
                             "account:toggle:" + account.accountId()),
                     callback("🗑 Убрать", "account:unlink:" + account.accountId())
             ));

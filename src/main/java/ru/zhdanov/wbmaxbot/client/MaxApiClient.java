@@ -16,6 +16,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +34,9 @@ public class MaxApiClient {
     public MaxApiClient(AppProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
     }
 
     public boolean isEnabled() {
@@ -63,6 +66,7 @@ public class MaxApiClient {
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("Authorization", properties.getMax().getToken())
                     .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .timeout(Duration.ofSeconds(20))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
@@ -104,6 +108,7 @@ public class MaxApiClient {
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("Authorization", properties.getMax().getToken())
                     .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .timeout(Duration.ofSeconds(20))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -147,6 +152,7 @@ public class MaxApiClient {
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("Authorization", properties.getMax().getToken())
                     .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .timeout(Duration.ofSeconds(20))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -185,6 +191,7 @@ public class MaxApiClient {
             URI uri = URI.create(properties.getMax().getBaseUrl() + "/updates?" + query);
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("Authorization", properties.getMax().getToken())
+                    .timeout(properties.getMax().getLongPollingTimeout().plusSeconds(10))
                     .GET()
                     .build();
 

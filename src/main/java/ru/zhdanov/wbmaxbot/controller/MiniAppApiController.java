@@ -74,6 +74,7 @@ public class MiniAppApiController {
         MiniAppPrincipal principal = miniAppSessionService.getRequired(sessionToken);
         return ResponseEntity.ok(Map.of(
                 "success", true,
+                "firstName", principal.firstName(),
                 "accounts", wbAccountService.listAccounts(principal.chatId())
         ));
     }

@@ -30,6 +30,9 @@ public class MiniAppSessionService {
     }
 
     public MiniAppPrincipal getRequired(String token) {
+        if (token == null || token.isBlank()) {
+            throw new IllegalArgumentException("Сессия mini app не найдена. Закройте и заново откройте mini app из MAX.");
+        }
         SessionEntry entry = sessions.get(token);
         if (entry == null || entry.expiresAt().isBefore(OffsetDateTime.now(zoneId))) {
             sessions.remove(token);
