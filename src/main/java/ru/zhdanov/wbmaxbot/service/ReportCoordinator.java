@@ -31,6 +31,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -50,9 +51,11 @@ public class ReportCoordinator {
     private final AlertEventRepository alertEventRepository;
     private final ObjectMapper objectMapper;
     private final ZoneId zoneId;
-    private final ExecutorService reportExecutor;
+    private final ExecutorService scheduledReportExecutor;
+    private final ExecutorService manualReportExecutor;
     private final ScheduledExecutorService reportWatchdogExecutor;
     private final Map<Long, ManualRunState> manualRunStates;
+    private final AtomicBoolean scheduledRunInProgress;
 
     public ReportCoordinator(AppProperties properties,
                              WildberriesScraper wildberriesScraper,
@@ -78,12 +81,23 @@ public class ReportCoordinator {
         this.objectMapper = objectMapper;
         this.zoneId = ZoneId.of(properties.getZoneId());
         this.manualRunStates = new ConcurrentHashMap<>();
-        this.reportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        this.scheduledRunInProgress = new AtomicBoolean(false);
+        this.scheduledReportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
             @Override
             public Thread newThread(Runnable runnable) {
-                Thread thread = new Thread(runnable, "wb-report-" + index.getAndIncrement());
+                Thread thread = new Thread(runnable, "wb-scheduled-report-" + index.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+        this.manualReportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+            private final AtomicInteger index = new AtomicInteger(1);
+
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "wb-manual-report-" + index.getAndIncrement());
                 thread.setDaemon(true);
                 return thread;
             }
@@ -99,23 +113,36 @@ public class ReportCoordinator {
     }
 
     public void executeScheduledRun() {
-        reportExecutor.submit(() -> executeInternal("scheduler", null));
+        if (!scheduledRunInProgress.compareAndSet(false, true)) {
+            log.info("Skipping scheduled run because previous scheduled report run is still in progress");
+            return;
+        }
+        scheduledReportExecutor.submit(() -> {
+            try {
+                executeInternal("scheduler", null, null);
+            } finally {
+                scheduledRunInProgress.set(false);
+            }
+        });
     }
 
     public void executeManualRun(Long chatId) {
         if (chatId == null) {
-            reportExecutor.submit(() -> executeInternal("manual", null));
+            manualReportExecutor.submit(() -> executeInternal("manual", null, null));
             return;
         }
         ManualRunState state = new ManualRunState();
-        if (manualRunStates.putIfAbsent(chatId, state) != null) {
+        ManualRunState existingState = manualRunStates.putIfAbsent(chatId, state);
+        if (existingState != null) {
+            log.info("Manual report request ignored for chat {} because another manual run is still tracked. blocking={}, timedOut={}, completed={}",
+                    chatId, existingState.blocking, existingState.timedOut, existingState.completed);
             return;
         }
         log.info("Manual report requested for chat {}", chatId);
         reportWatchdogExecutor.schedule(() -> handleManualRunTimeout(chatId, state), 90, TimeUnit.SECONDS);
-        reportExecutor.submit(() -> {
+        manualReportExecutor.submit(() -> {
             try {
-                executeInternal("manual", chatId);
+                executeInternal("manual", chatId, state);
             } finally {
                 state.completed = true;
                 manualRunStates.remove(chatId, state);
@@ -130,7 +157,8 @@ public class ReportCoordinator {
 
     @PreDestroy
     public void shutdownExecutor() {
-        reportExecutor.shutdownNow();
+        scheduledReportExecutor.shutdownNow();
+        manualReportExecutor.shutdownNow();
         reportWatchdogExecutor.shutdownNow();
     }
 
@@ -144,8 +172,7 @@ public class ReportCoordinator {
         );
     }
 
-    private void executeInternal(String source, Long manualChatId) {
-        ManualRunState manualState = manualChatId == null ? null : manualRunStates.get(manualChatId);
+    private void executeInternal(String source, Long manualChatId, ManualRunState manualState) {
         List<ChatSubscription> targetChats = manualChatId != null
                 ? List.of(chatSettingsService.getRequired(manualChatId))
                 : chatSettingsService.findChatsDueForAutoReport(OffsetDateTime.now(zoneId));
@@ -255,6 +282,7 @@ public class ReportCoordinator {
         }
         state.blocking = false;
         state.timedOut = true;
+        manualRunStates.remove(chatId, state);
         maxMessagingService.sendToChat(chatId, maxBotUiService.buildReportTimedOutMessage());
     }
 
