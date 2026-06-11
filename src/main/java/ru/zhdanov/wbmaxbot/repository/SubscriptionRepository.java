@@ -228,12 +228,12 @@ public class SubscriptionRepository {
                 rs.getString("pending_input_state"),
                 rs.getString("pending_wb_auth_flow_id"),
                 rs.getString("pending_wb_auth_phone_number"),
-                OffsetDateTime.parse(rs.getString("created_at")),
-                OffsetDateTime.parse(rs.getString("last_seen_at"))
+                DbTimeParser.parseRequired(rs.getString("created_at")),
+                DbTimeParser.parseRequired(rs.getString("last_seen_at"))
         );
     }
 
     private OffsetDateTime parseNullableOffsetDateTime(String value) {
-        return value == null || value.isBlank() ? null : OffsetDateTime.parse(value);
+        return DbTimeParser.parseNullable(value);
     }
 }

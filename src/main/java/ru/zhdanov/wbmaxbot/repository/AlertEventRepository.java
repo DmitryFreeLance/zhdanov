@@ -23,7 +23,7 @@ public class AlertEventRepository {
                         order by created_at desc
                         limit 1
                         """,
-                rs -> rs.next() ? Optional.of(OffsetDateTime.parse(rs.getString("created_at"))) : Optional.empty(),
+                rs -> rs.next() ? Optional.of(DbTimeParser.parseRequired(rs.getString("created_at"))) : Optional.empty(),
                 dedupeKey
         );
     }

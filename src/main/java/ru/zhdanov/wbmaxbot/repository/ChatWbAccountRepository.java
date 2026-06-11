@@ -111,13 +111,13 @@ public class ChatWbAccountRepository {
                 rs.getInt("enabled") == 1,
                 rs.getString("status"),
                 rs.getString("last_error"),
-                OffsetDateTime.parse(rs.getString("created_at")),
-                OffsetDateTime.parse(rs.getString("updated_at")),
+                DbTimeParser.parseRequired(rs.getString("created_at")),
+                DbTimeParser.parseRequired(rs.getString("updated_at")),
                 parseNullableOffsetDateTime(rs.getString("last_authenticated_at"))
         );
     }
 
     private OffsetDateTime parseNullableOffsetDateTime(String value) {
-        return value == null || value.isBlank() ? null : OffsetDateTime.parse(value);
+        return DbTimeParser.parseNullable(value);
     }
 }
