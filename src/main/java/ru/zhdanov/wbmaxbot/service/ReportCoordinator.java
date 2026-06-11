@@ -29,6 +29,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -93,7 +94,7 @@ public class ReportCoordinator {
                 return thread;
             }
         });
-        this.manualReportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        this.manualReportExecutor = Executors.newFixedThreadPool(4, new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
             @Override
@@ -141,7 +142,7 @@ public class ReportCoordinator {
         }
         log.info("Manual report requested for chat {}", chatId);
         reportWatchdogExecutor.schedule(() -> handleManualRunTimeout(chatId, state), 90, TimeUnit.SECONDS);
-        manualReportExecutor.submit(() -> {
+        Future<?> future = manualReportExecutor.submit(() -> {
             try {
                 executeInternal("manual", chatId, state);
             } finally {
@@ -149,6 +150,7 @@ public class ReportCoordinator {
                 manualRunStates.remove(chatId, state);
             }
         });
+        state.future = future;
     }
 
     public boolean isManualRunInProgress(long chatId) {
@@ -359,6 +361,11 @@ public class ReportCoordinator {
         state.blocking = false;
         state.timedOut = true;
         manualRunStates.remove(chatId, state);
+        Future<?> future = state.future;
+        if (future != null) {
+            future.cancel(true);
+        }
+        log.warn("Manual report timed out for chat {} after 90 seconds", chatId);
         maxMessagingService.sendToChat(chatId, maxBotUiService.buildReportTimedOutMessage());
     }
 
@@ -477,6 +484,7 @@ public class ReportCoordinator {
         volatile boolean blocking = true;
         volatile boolean timedOut = false;
         volatile boolean completed = false;
+        volatile Future<?> future;
     }
 
     private static final class ScheduledAccountDispatch {
