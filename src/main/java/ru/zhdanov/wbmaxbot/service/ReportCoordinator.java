@@ -111,6 +111,7 @@ public class ReportCoordinator {
         if (manualRunStates.putIfAbsent(chatId, state) != null) {
             return;
         }
+        log.info("Manual report requested for chat {}", chatId);
         reportWatchdogExecutor.schedule(() -> handleManualRunTimeout(chatId, state), 90, TimeUnit.SECONDS);
         reportExecutor.submit(() -> {
             try {
@@ -235,8 +236,12 @@ public class ReportCoordinator {
                 successCount++;
             } else {
                 failureCount++;
+                log.warn("Failed to deliver report message for chat {} and account {}. part={}/{} status={}",
+                        chat.chatId(), account.accountId(), i + 1, reportMessages.size(), status);
             }
         }
+        log.info("Report delivery status for chat {} and account {}: sent={}, failed={}, parts={}",
+                chat.chatId(), account.accountId(), successCount, failureCount, reportMessages.size());
         statuses.put(statusKey(chat.chatId(), account.accountId()), "sent=" + successCount + ", failed=" + failureCount);
         if (markAsScheduledSend && failureCount == 0) {
             chatSettingsService.markReportSent(chat.chatId(), scrapedAt);
