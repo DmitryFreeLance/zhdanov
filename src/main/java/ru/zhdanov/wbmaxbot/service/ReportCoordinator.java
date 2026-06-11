@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -180,8 +181,17 @@ public class ReportCoordinator {
             return;
         }
 
+        if (manualChatId == null) {
+            log.info("Starting scheduled report run for {} due chats", targetChats.size());
+        }
+
         try {
             boolean sentAny = false;
+            if (manualChatId == null) {
+                sentAny = executeScheduledChats(source, targetChats);
+                return;
+            }
+
             for (ChatSubscription chat : targetChats) {
                 List<ChatLinkedWbAccount> accounts = wbAccountService.listEnabledAccounts(chat.chatId());
                 if (accounts.isEmpty()) {
@@ -238,6 +248,72 @@ public class ReportCoordinator {
                 maxMessagingService.sendToChat(manualChatId, maxBotUiService.buildErrorMessage("Не удалось получить отчёт WB: " + e.getMessage()));
             }
         }
+    }
+
+    private boolean executeScheduledChats(String source, List<ChatSubscription> targetChats) {
+        Map<Long, ScheduledAccountDispatch> dispatches = new LinkedHashMap<>();
+        Map<Long, ChatSubscription> chatsById = new HashMap<>();
+
+        for (ChatSubscription chat : targetChats) {
+            chatsById.put(chat.chatId(), chat);
+            List<ChatLinkedWbAccount> accounts = wbAccountService.listEnabledAccounts(chat.chatId());
+            if (accounts.isEmpty()) {
+                continue;
+            }
+            for (ChatLinkedWbAccount account : accounts) {
+                ScheduledAccountDispatch dispatch = dispatches.computeIfAbsent(
+                        account.accountId(),
+                        ignored -> new ScheduledAccountDispatch(account)
+                );
+                dispatch.chatIds.add(chat.chatId());
+            }
+        }
+
+        if (dispatches.isEmpty()) {
+            return false;
+        }
+
+        log.info("Scheduled report run will process {} unique WB accounts for {} due chats",
+                dispatches.size(), targetChats.size());
+
+        boolean sentAny = false;
+        for (ScheduledAccountDispatch dispatch : dispatches.values()) {
+            ChatLinkedWbAccount account = dispatch.account;
+            try {
+                ScrapeResult result = wildberriesScraper.scrapeReport(account.storageStateJson());
+                List<String> reportMessages = notificationFormatter.buildReportMessages(
+                        result,
+                        properties.getAlert().getMaxRowsInMessage(),
+                        maskPhone(account.phoneNumber())
+                );
+                String summaryJson = toJson(result.summary());
+                String reportText = String.join("\n\n---\n\n", reportMessages);
+
+                for (Long chatId : dispatch.chatIds) {
+                    ChatSubscription chat = chatsById.get(chatId);
+                    if (chat == null) {
+                        continue;
+                    }
+                    Map<String, String> messageStatuses = sendReportMessages(
+                            chat,
+                            account,
+                            reportMessages,
+                            true,
+                            result.scrapedAt(),
+                            null
+                    );
+                    long runId = reportRepository.saveSuccessfulRun(result, source, summaryJson, reportText);
+                    log.info("Stored report run {} for chat {} and account {}", runId, chat.chatId(), account.accountId());
+                    processAlerts(result, chat, account, messageStatuses);
+                    sentAny = true;
+                }
+            } catch (Exception accountError) {
+                log.error("Scheduled report execution failed for shared account {}", account.accountId(), accountError);
+                reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", accountError.getMessage());
+            }
+        }
+
+        return sentAny;
     }
 
     private Map<String, String> sendReportMessages(ChatSubscription chat,
@@ -401,5 +477,14 @@ public class ReportCoordinator {
         volatile boolean blocking = true;
         volatile boolean timedOut = false;
         volatile boolean completed = false;
+    }
+
+    private static final class ScheduledAccountDispatch {
+        private final ChatLinkedWbAccount account;
+        private final List<Long> chatIds = new ArrayList<>();
+
+        private ScheduledAccountDispatch(ChatLinkedWbAccount account) {
+            this.account = account;
+        }
     }
 }
