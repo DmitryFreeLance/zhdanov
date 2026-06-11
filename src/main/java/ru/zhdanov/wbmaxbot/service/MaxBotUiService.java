@@ -361,18 +361,31 @@ public class MaxBotUiService {
         return "WB аккаунт подключён и сделан активным: " + maskPhone(phoneNumber);
     }
 
-    public MaxOutgoingMessage buildErrorMessage(String text) {
+    public MaxOutgoingMessage buildMenuMessage(String text) {
         return withKeyboard(text, row(callback("🔙 В меню", "menu:main")));
     }
 
+    public MaxOutgoingMessage buildErrorMessage(String text) {
+        return buildMenuMessage(compactErrorText(text));
+    }
+
+    public MaxOutgoingMessage buildReportStartingMessage() {
+        return buildMenuMessage("Формирую отчёт...");
+    }
+
+    public MaxOutgoingMessage buildReportAlreadyRunningMessage() {
+        return buildMenuMessage("Отчёт уже формируется. Подождите, пока придёт результат.");
+    }
+
     public MaxOutgoingMessage buildAlertMessage(String text, String phoneNumber, boolean voiceCallEnabled) {
-        if (!hasPhone(phoneNumber)) {
-            return new MaxOutgoingMessage(text);
+        String finalText = text;
+        if (hasPhone(phoneNumber)) {
+            String suffix = voiceCallEnabled
+                    ? "\n\n📞 Если нужно перезвонить вручную: " + phoneNumber
+                    : "\n\n📞 Номер для ручного звонка: " + phoneNumber;
+            finalText += suffix;
         }
-        String suffix = voiceCallEnabled
-                ? "\n\n📞 Если нужно перезвонить вручную: " + phoneNumber
-                : "\n\n📞 Номер для ручного звонка: " + phoneNumber;
-        return new MaxOutgoingMessage(text + suffix);
+        return buildMenuMessage(finalText);
     }
 
     private String formatInterval(ChatSubscription chat) {
@@ -389,6 +402,44 @@ public class MaxBotUiService {
 
     private String formatAlertParking(ChatSubscription chat) {
         return chat.alertParking() == null || chat.alertParking().isBlank() ? "все парковки" : chat.alertParking();
+    }
+
+    private String compactErrorText(String text) {
+        if (text == null || text.isBlank()) {
+            return "Произошла ошибка. Попробуйте ещё раз.";
+        }
+
+        if (text.startsWith("Timed out waiting for WB report table")
+                || text.startsWith("WB report page did not open in time")) {
+            return "WB долго открывает страницу отчёта. Попробуйте ещё раз чуть позже.";
+        }
+
+        if (text.startsWith("Не удалось получить отчёт для аккаунта ")) {
+            int detailsIndex = text.indexOf(": ");
+            if (detailsIndex > 0) {
+                String prefix = text.substring(0, detailsIndex);
+                String details = text.substring(detailsIndex + 2);
+                if (details.startsWith("Timed out waiting for WB report table")
+                        || details.startsWith("WB report page did not open in time")) {
+                    return prefix + ": WB долго открывает страницу отчёта. Попробуйте ещё раз чуть позже.";
+                }
+            }
+        }
+
+        int cutIndex = indexOfFirst(text, ". URL:", ". Title:", ". Heading:", ". Screen:", "\nCall log:");
+        String compact = cutIndex >= 0 ? text.substring(0, cutIndex).trim() : text.trim();
+        return compact.length() > 500 ? compact.substring(0, 500).trim() + "..." : compact;
+    }
+
+    private int indexOfFirst(String text, String... needles) {
+        int result = -1;
+        for (String needle : needles) {
+            int index = text.indexOf(needle);
+            if (index >= 0 && (result < 0 || index < result)) {
+                result = index;
+            }
+        }
+        return result;
     }
 
     private String formatRatioPercent(double threshold) {

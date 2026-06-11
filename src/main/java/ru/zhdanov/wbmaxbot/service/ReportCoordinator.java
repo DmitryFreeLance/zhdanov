@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -48,6 +50,7 @@ public class ReportCoordinator {
     private final ObjectMapper objectMapper;
     private final ZoneId zoneId;
     private final ExecutorService reportExecutor;
+    private final Set<Long> manualReportsInProgress;
 
     public ReportCoordinator(AppProperties properties,
                              WildberriesScraper wildberriesScraper,
@@ -72,6 +75,7 @@ public class ReportCoordinator {
         this.alertEventRepository = alertEventRepository;
         this.objectMapper = objectMapper;
         this.zoneId = ZoneId.of(properties.getZoneId());
+        this.manualReportsInProgress = ConcurrentHashMap.newKeySet();
         this.reportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
@@ -89,7 +93,24 @@ public class ReportCoordinator {
     }
 
     public void executeManualRun(Long chatId) {
-        reportExecutor.submit(() -> executeInternal("manual", chatId));
+        if (chatId == null) {
+            reportExecutor.submit(() -> executeInternal("manual", null));
+            return;
+        }
+        if (!manualReportsInProgress.add(chatId)) {
+            return;
+        }
+        reportExecutor.submit(() -> {
+            try {
+                executeInternal("manual", chatId);
+            } finally {
+                manualReportsInProgress.remove(chatId);
+            }
+        });
+    }
+
+    public boolean isManualRunInProgress(long chatId) {
+        return manualReportsInProgress.contains(chatId);
     }
 
     @PreDestroy
@@ -121,7 +142,8 @@ public class ReportCoordinator {
                 List<ChatLinkedWbAccount> accounts = wbAccountService.listEnabledAccounts(chat.chatId());
                 if (accounts.isEmpty()) {
                     if (manualChatId != null) {
-                        maxMessagingService.sendToChat(chat.chatId(), "У этого чата ещё нет подключённых WB аккаунтов. Откройте раздел аккаунтов и авторизуйтесь.");
+                        maxMessagingService.sendToChat(chat.chatId(),
+                                maxBotUiService.buildErrorMessage("У этого чата ещё нет подключённых WB аккаунтов. Откройте раздел аккаунтов и авторизуйтесь."));
                     }
                     continue;
                 }
@@ -153,7 +175,8 @@ public class ReportCoordinator {
             }
 
             if (manualChatId != null && !sentAny) {
-                maxMessagingService.sendToChat(manualChatId, "Не удалось отправить отчёт: нет доступных WB аккаунтов.");
+                maxMessagingService.sendToChat(manualChatId,
+                        maxBotUiService.buildErrorMessage("Не удалось отправить отчёт: нет доступных WB аккаунтов."));
             }
         } catch (Exception e) {
             log.error("Report execution failed", e);
@@ -172,8 +195,12 @@ public class ReportCoordinator {
         Map<String, String> statuses = new LinkedHashMap<>();
         int successCount = 0;
         int failureCount = 0;
-        for (String message : reportMessages) {
-            String status = maxMessagingService.sendToChat(chat.chatId(), message);
+        for (int i = 0; i < reportMessages.size(); i++) {
+            String message = reportMessages.get(i);
+            boolean lastMessage = i == reportMessages.size() - 1;
+            String status = lastMessage
+                    ? maxMessagingService.sendToChat(chat.chatId(), maxBotUiService.buildMenuMessage(message))
+                    : maxMessagingService.sendToChat(chat.chatId(), message);
             if (status.startsWith("sent")) {
                 successCount++;
             } else {

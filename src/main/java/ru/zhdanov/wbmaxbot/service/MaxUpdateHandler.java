@@ -165,7 +165,12 @@ public class MaxUpdateHandler {
             }
             case "report:now" -> {
                 cancelPendingInput(chat);
+                if (reportCoordinator.isManualRunInProgress(chatId)) {
+                    maxMessagingService.answerCallback(chatId, callbackId, "Отчёт уже формируется", maxBotUiService.buildReportAlreadyRunningMessage());
+                    return;
+                }
                 maxMessagingService.answerCallback(chatId, callbackId, "Формирую отчёт...", buildMainMenu(chatId));
+                maxMessagingService.sendToChat(chatId, maxBotUiService.buildReportStartingMessage());
                 reportCoordinator.executeManualRun(chatId);
             }
             case "interval:15" -> updateInterval(chatId, callbackId, 15);
