@@ -35,6 +35,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class ReportCoordinator {
@@ -58,6 +59,7 @@ public class ReportCoordinator {
     private final ScheduledExecutorService reportWatchdogExecutor;
     private final Map<Long, ManualRunState> manualRunStates;
     private final AtomicBoolean scheduledRunInProgress;
+    private final AtomicReference<Future<?>> scheduledRunFuture;
 
     public ReportCoordinator(AppProperties properties,
                              WildberriesScraper wildberriesScraper,
@@ -84,6 +86,7 @@ public class ReportCoordinator {
         this.zoneId = ZoneId.of(properties.getZoneId());
         this.manualRunStates = new ConcurrentHashMap<>();
         this.scheduledRunInProgress = new AtomicBoolean(false);
+        this.scheduledRunFuture = new AtomicReference<>();
         this.scheduledReportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
@@ -119,13 +122,16 @@ public class ReportCoordinator {
             log.info("Skipping scheduled run because previous scheduled report run is still in progress");
             return;
         }
-        scheduledReportExecutor.submit(() -> {
+        Future<?> future = scheduledReportExecutor.submit(() -> {
             try {
                 executeInternal("scheduler", null, null);
             } finally {
+                scheduledRunFuture.set(null);
                 scheduledRunInProgress.set(false);
             }
         });
+        scheduledRunFuture.set(future);
+        reportWatchdogExecutor.schedule(() -> handleScheduledRunTimeout(future), 180, TimeUnit.SECONDS);
     }
 
     public void executeManualRun(Long chatId) {
@@ -367,6 +373,18 @@ public class ReportCoordinator {
         }
         log.warn("Manual report timed out for chat {} after 90 seconds", chatId);
         maxMessagingService.sendToChat(chatId, maxBotUiService.buildReportTimedOutMessage());
+    }
+
+    private void handleScheduledRunTimeout(Future<?> future) {
+        if (future == null || future.isDone()) {
+            return;
+        }
+        if (!scheduledRunFuture.compareAndSet(future, null)) {
+            return;
+        }
+        future.cancel(true);
+        scheduledRunInProgress.set(false);
+        log.warn("Scheduled report run timed out after 180 seconds and was cancelled");
     }
 
     private boolean isManualTimedOut(ManualRunState state) {
