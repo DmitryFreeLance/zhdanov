@@ -370,11 +370,15 @@ public class MaxBotUiService {
     }
 
     public MaxOutgoingMessage buildReportStartingMessage() {
-        return buildMenuMessage("Формирую отчёт...");
+        return new MaxOutgoingMessage("Формирую отчёт...");
     }
 
     public MaxOutgoingMessage buildReportAlreadyRunningMessage() {
         return buildMenuMessage("Отчёт уже формируется. Подождите, пока придёт результат.");
+    }
+
+    public MaxOutgoingMessage buildReportTimedOutMessage() {
+        return buildErrorMessage("Не удалось сформировать отчёт. Попробуйте ещё раз.");
     }
 
     public MaxOutgoingMessage buildAlertMessage(String text, String phoneNumber, boolean voiceCallEnabled) {

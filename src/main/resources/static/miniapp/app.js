@@ -69,7 +69,7 @@ async function init() {
 
   sessionToken = session.sessionToken;
   applyPhoneFromQuery();
-  setStatus(`Привет, ${session.firstName}. Подключайте аккаунты WB через импорт готовой сессии.`, "success");
+  setStatus(`Привет, ${session.firstName}. Введите номер, откройте WB Logistics на ноутбуке или ПК, вставьте скрипт в консоль и потом импортируйте JSON сюда.`, "success");
   await reloadAccounts();
 }
 
@@ -80,7 +80,7 @@ storageStateFileInput.addEventListener("change", async (event) => {
   }
   try {
     storageStateInput.value = await file.text();
-    setStatus("JSON storage state загружен из файла. Теперь нажмите «Импортировать сессию».", "success");
+    setStatus("JSON загружен из файла. Теперь нажмите «Импортировать сессию», и бот привяжет его к номеру из поля выше.", "success");
   } catch (error) {
     setStatus(error.message || "Не удалось прочитать файл storage state.", "error");
   }
@@ -112,7 +112,7 @@ importSessionButton.addEventListener("click", async () => {
     });
     storageStateFileInput.value = "";
     storageStateInput.value = "";
-    setStatus(result.message || "WB-сессия импортирована.", "success");
+    setStatus(result.message || `WB-сессия импортирована и привязана к номеру ${phoneNumber}.`, "success");
     renderAccounts(result.accounts || []);
   } catch (error) {
     setStatus(error.message, "error");
@@ -125,7 +125,7 @@ importSessionButton.addEventListener("click", async () => {
 copyExportScriptButton.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(WB_EXPORT_SCRIPT);
-    setStatus("Скрипт скопирован. Откройте WB в обычном браузере, вставьте его в консоль и потом вставьте полученный JSON сюда.", "success");
+    setStatus("Скрипт скопирован. Откройте WB Logistics на ноутбуке или ПК, вставьте скрипт в консоль и потом вставьте полученный JSON сюда.", "success");
   } catch (error) {
     setStatus("Не удалось скопировать скрипт автоматически. Разрешите доступ к буферу обмена.", "error");
   }

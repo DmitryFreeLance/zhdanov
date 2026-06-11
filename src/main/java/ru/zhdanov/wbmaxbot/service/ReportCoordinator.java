@@ -25,11 +25,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -50,7 +51,8 @@ public class ReportCoordinator {
     private final ObjectMapper objectMapper;
     private final ZoneId zoneId;
     private final ExecutorService reportExecutor;
-    private final Set<Long> manualReportsInProgress;
+    private final ScheduledExecutorService reportWatchdogExecutor;
+    private final Map<Long, ManualRunState> manualRunStates;
 
     public ReportCoordinator(AppProperties properties,
                              WildberriesScraper wildberriesScraper,
@@ -75,13 +77,21 @@ public class ReportCoordinator {
         this.alertEventRepository = alertEventRepository;
         this.objectMapper = objectMapper;
         this.zoneId = ZoneId.of(properties.getZoneId());
-        this.manualReportsInProgress = ConcurrentHashMap.newKeySet();
+        this.manualRunStates = new ConcurrentHashMap<>();
         this.reportExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
             @Override
             public Thread newThread(Runnable runnable) {
                 Thread thread = new Thread(runnable, "wb-report-" + index.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+        this.reportWatchdogExecutor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "wb-report-watchdog");
                 thread.setDaemon(true);
                 return thread;
             }
@@ -97,25 +107,30 @@ public class ReportCoordinator {
             reportExecutor.submit(() -> executeInternal("manual", null));
             return;
         }
-        if (!manualReportsInProgress.add(chatId)) {
+        ManualRunState state = new ManualRunState();
+        if (manualRunStates.putIfAbsent(chatId, state) != null) {
             return;
         }
+        reportWatchdogExecutor.schedule(() -> handleManualRunTimeout(chatId, state), 90, TimeUnit.SECONDS);
         reportExecutor.submit(() -> {
             try {
                 executeInternal("manual", chatId);
             } finally {
-                manualReportsInProgress.remove(chatId);
+                state.completed = true;
+                manualRunStates.remove(chatId, state);
             }
         });
     }
 
     public boolean isManualRunInProgress(long chatId) {
-        return manualReportsInProgress.contains(chatId);
+        ManualRunState state = manualRunStates.get(chatId);
+        return state != null && state.blocking;
     }
 
     @PreDestroy
     public void shutdownExecutor() {
         reportExecutor.shutdownNow();
+        reportWatchdogExecutor.shutdownNow();
     }
 
     public String buildStatusMessage() {
@@ -129,6 +144,7 @@ public class ReportCoordinator {
     }
 
     private void executeInternal(String source, Long manualChatId) {
+        ManualRunState manualState = manualChatId == null ? null : manualRunStates.get(manualChatId);
         List<ChatSubscription> targetChats = manualChatId != null
                 ? List.of(chatSettingsService.getRequired(manualChatId))
                 : chatSettingsService.findChatsDueForAutoReport(OffsetDateTime.now(zoneId));
@@ -156,15 +172,24 @@ public class ReportCoordinator {
                                 properties.getAlert().getMaxRowsInMessage(),
                                 maskPhone(account.phoneNumber())
                         );
-                        Map<String, String> messageStatuses = sendReportMessages(chat, account, reportMessages, manualChatId == null, result.scrapedAt());
+                        Map<String, String> messageStatuses = sendReportMessages(
+                                chat,
+                                account,
+                                reportMessages,
+                                manualChatId == null,
+                                result.scrapedAt(),
+                                manualState
+                        );
                         long runId = reportRepository.saveSuccessfulRun(result, source, toJson(result.summary()), String.join("\n\n---\n\n", reportMessages));
                         log.info("Stored report run {} for chat {} and account {}", runId, chat.chatId(), account.accountId());
-                        processAlerts(result, chat, account, messageStatuses);
-                        sentAny = true;
+                        if (!isManualTimedOut(manualState)) {
+                            processAlerts(result, chat, account, messageStatuses);
+                            sentAny = true;
+                        }
                     } catch (Exception accountError) {
                         log.error("Report execution failed for chat {} and account {}", chat.chatId(), account.accountId(), accountError);
                         reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", accountError.getMessage());
-                        if (manualChatId != null) {
+                        if (manualChatId != null && !isManualTimedOut(manualState)) {
                             maxMessagingService.sendToChat(chat.chatId(),
                                     maxBotUiService.buildErrorMessage(
                                             "Не удалось получить отчёт для аккаунта " + maskPhone(account.phoneNumber()) + ": " + accountError.getMessage()
@@ -174,14 +199,14 @@ public class ReportCoordinator {
                 }
             }
 
-            if (manualChatId != null && !sentAny) {
+            if (manualChatId != null && !sentAny && !isManualTimedOut(manualState)) {
                 maxMessagingService.sendToChat(manualChatId,
                         maxBotUiService.buildErrorMessage("Не удалось отправить отчёт: нет доступных WB аккаунтов."));
             }
         } catch (Exception e) {
             log.error("Report execution failed", e);
             reportRepository.saveFailedRun(source, "{\"status\":\"failed\"}", e.getMessage());
-            if (manualChatId != null) {
+            if (manualChatId != null && !isManualTimedOut(manualState)) {
                 maxMessagingService.sendToChat(manualChatId, maxBotUiService.buildErrorMessage("Не удалось получить отчёт WB: " + e.getMessage()));
             }
         }
@@ -191,8 +216,13 @@ public class ReportCoordinator {
                                                    ChatLinkedWbAccount account,
                                                    List<String> reportMessages,
                                                    boolean markAsScheduledSend,
-                                                   OffsetDateTime scrapedAt) {
+                                                   OffsetDateTime scrapedAt,
+                                                   ManualRunState manualState) {
         Map<String, String> statuses = new LinkedHashMap<>();
+        if (isManualTimedOut(manualState)) {
+            statuses.put(statusKey(chat.chatId(), account.accountId()), "skipped: manual-timeout");
+            return statuses;
+        }
         int successCount = 0;
         int failureCount = 0;
         for (int i = 0; i < reportMessages.size(); i++) {
@@ -212,6 +242,19 @@ public class ReportCoordinator {
             chatSettingsService.markReportSent(chat.chatId(), scrapedAt);
         }
         return statuses;
+    }
+
+    private void handleManualRunTimeout(long chatId, ManualRunState state) {
+        if (state.completed || !state.blocking) {
+            return;
+        }
+        state.blocking = false;
+        state.timedOut = true;
+        maxMessagingService.sendToChat(chatId, maxBotUiService.buildReportTimedOutMessage());
+    }
+
+    private boolean isManualTimedOut(ManualRunState state) {
+        return state != null && state.timedOut;
     }
 
     private void processAlerts(ScrapeResult result,
@@ -319,5 +362,11 @@ public class ReportCoordinator {
         } catch (JsonProcessingException e) {
             return "{\"serialization\":\"failed\"}";
         }
+    }
+
+    private static final class ManualRunState {
+        volatile boolean blocking = true;
+        volatile boolean timedOut = false;
+        volatile boolean completed = false;
     }
 }
