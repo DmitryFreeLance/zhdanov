@@ -188,12 +188,18 @@ public class VoiceCallFollowUpService {
     }
 
     private String waitForTranscription(String callId) throws IOException, InterruptedException {
-        for (int attempt = 0; attempt < 12; attempt++) {
-            JsonNode body = postJson(
+        for (int attempt = 0; attempt < 18; attempt++) {
+            JsonNode body = postJsonOrNullOnNotFound(
                     properties.getTelephony().getExolve().getBaseUrl() + "/statistics/call-record/v1/GetTranscribation",
                     Map.of("uid", parseUid(callId))
             );
-            log.info("Exolve GetTranscribation poll. callId={}, attempt={}/12, body={}",
+            if (body == null) {
+                log.info("Exolve GetTranscribation poll. callId={}, attempt={}/18, result=not-found-yet",
+                        callId, attempt + 1);
+                Thread.sleep(5000L);
+                continue;
+            }
+            log.info("Exolve GetTranscribation poll. callId={}, attempt={}/18, body={}",
                     callId, attempt + 1, truncate(body.toString()));
             String text = extractTranscription(body);
             if (text != null && !text.isBlank()) {
@@ -213,6 +219,24 @@ public class VoiceCallFollowUpService {
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() / 100 != 2) {
+            throw new IOException("Exolve HTTP " + response.statusCode() + ": " + response.body());
+        }
+        return objectMapper.readTree(response.body());
+    }
+
+    private JsonNode postJsonOrNullOnNotFound(String url, Map<String, Object> payload) throws IOException, InterruptedException {
+        String json = objectMapper.writeValueAsString(payload);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .header("Authorization", "Bearer " + properties.getTelephony().getExolve().getApiKey().trim())
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(20))
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 404) {
+            return null;
+        }
         if (response.statusCode() / 100 != 2) {
             throw new IOException("Exolve HTTP " + response.statusCode() + ": " + response.body());
         }
