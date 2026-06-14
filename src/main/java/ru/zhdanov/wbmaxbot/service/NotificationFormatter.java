@@ -93,6 +93,82 @@ public class NotificationFormatter {
                 "Заполнение " + Math.round(row.ratio() * 100) + " процентов.";
     }
 
+    public String buildVoiceText(List<AlertTrigger> triggers) {
+        if (triggers == null || triggers.isEmpty()) {
+            return "Внимание. Обнаружена тревога WB Last Mile.";
+        }
+        if (triggers.size() == 1) {
+            return buildVoiceText(triggers.getFirst());
+        }
+
+        StringBuilder text = new StringBuilder("Внимание. Обнаружено ")
+                .append(triggers.size())
+                .append(" тревоги WB Last Mile. ");
+        for (int i = 0; i < triggers.size(); i++) {
+            AlertTrigger trigger = triggers.get(i);
+            ReportRow row = trigger.row();
+            text.append("Пункт ")
+                    .append(i + 1)
+                    .append(". Маршрут ")
+                    .append(row.route())
+                    .append(". Парковка ")
+                    .append(row.parking())
+                    .append(". Количество ШК ")
+                    .append(row.shk())
+                    .append(". Норма выезда ")
+                    .append(row.norm())
+                    .append(". Заполнение ")
+                    .append(Math.round(row.ratio() * 100))
+                    .append(" процентов. ");
+        }
+        return text.toString().trim();
+    }
+
+    public String buildAlertSummaryMessage(List<AlertTrigger> triggers,
+                                           boolean voiceCallEnabled,
+                                           String accountLabel,
+                                           String spokenText) {
+        if (triggers == null || triggers.isEmpty()) {
+            return "";
+        }
+        if (triggers.size() == 1) {
+            String base = buildAlertMessage(triggers.getFirst(), voiceCallEnabled, accountLabel);
+            return base + "\n\nТекст звонка:\n" + spokenText;
+        }
+
+        StringBuilder message = new StringBuilder("""
+                Тревога WB Last Mile
+                %s
+                Причин в отчёте: %d
+                Действие: %s
+
+                """.formatted(
+                formatAccountLine(accountLabel),
+                triggers.size(),
+                voiceCallEnabled ? "автоматический звонок запущен" : "нужно позвонить вручную"
+        ));
+
+        for (int i = 0; i < triggers.size(); i++) {
+            AlertTrigger trigger = triggers.get(i);
+            ReportRow row = trigger.row();
+            message.append(i + 1)
+                    .append(". ")
+                    .append(resolveParkingEmoji(row.ratio()))
+                    .append(" Парковка ")
+                    .append(row.parking())
+                    .append(" • ШК ")
+                    .append(row.shk())
+                    .append(" • Норма ")
+                    .append(row.norm())
+                    .append(" • Причина: ")
+                    .append(trigger.reason())
+                    .append("\n");
+        }
+
+        message.append("\nТекст звонка:\n").append(spokenText);
+        return message.toString().trim();
+    }
+
     public String buildWelcomeMessage() {
         return """
                 Бот подключён.

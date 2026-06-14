@@ -48,6 +48,7 @@ public class ReportCoordinator {
     private final MaxBotUiService maxBotUiService;
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
+    private final VoiceCallFollowUpService voiceCallFollowUpService;
     private final ChatSettingsService chatSettingsService;
     private final WbAccountService wbAccountService;
     private final ReportRepository reportRepository;
@@ -67,6 +68,7 @@ public class ReportCoordinator {
                              MaxBotUiService maxBotUiService,
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
+                             VoiceCallFollowUpService voiceCallFollowUpService,
                              ChatSettingsService chatSettingsService,
                              WbAccountService wbAccountService,
                              ReportRepository reportRepository,
@@ -78,6 +80,7 @@ public class ReportCoordinator {
         this.maxBotUiService = maxBotUiService;
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
+        this.voiceCallFollowUpService = voiceCallFollowUpService;
         this.chatSettingsService = chatSettingsService;
         this.wbAccountService = wbAccountService;
         this.reportRepository = reportRepository;
@@ -395,22 +398,35 @@ public class ReportCoordinator {
                                ChatSubscription chat,
                                ChatLinkedWbAccount account,
                                Map<String, String> baseMessageStatuses) {
+        List<AlertTrigger> activeTriggers = new ArrayList<>();
         for (AlertTrigger trigger : evaluateTriggers(result, chat)) {
             String dedupeKey = chat.chatId() + ":" + account.accountId() + ":" + trigger.dedupeKey();
             if (isSuppressedByCooldown(dedupeKey)) {
                 continue;
             }
+            activeTriggers.add(trigger);
+        }
 
-            boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled() && chat.callEnabled();
+        if (activeTriggers.isEmpty()) {
+            return;
+        }
+
+        boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled()
+                && chat.callEnabled()
+                && isVoiceAllowedFor(chat);
+        String voiceText = notificationFormatter.buildVoiceText(activeTriggers);
+        VoiceCallResult callResult = voiceCallEnabled
+                ? voiceAlertService.callTarget(chat.phoneNumber(), voiceText)
+                : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+
+        for (AlertTrigger trigger : activeTriggers) {
             String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled, maskPhone(account.phoneNumber()));
             String messageStatus = maxMessagingService.sendToChat(
                     chat.chatId(),
                     maxBotUiService.buildAlertMessage(alertMessage, chat.phoneNumber(), voiceCallEnabled)
             );
-            VoiceCallResult callResult = voiceCallEnabled
-                    ? voiceAlertService.callTarget(chat.phoneNumber(), notificationFormatter.buildVoiceText(trigger))
-                    : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
 
+            String dedupeKey = chat.chatId() + ":" + account.accountId() + ":" + trigger.dedupeKey();
             alertEventRepository.save(
                     OffsetDateTime.now(zoneId),
                     dedupeKey,
@@ -426,6 +442,10 @@ public class ReportCoordinator {
                     callResult.externalId(),
                     callResult.details()
             );
+        }
+
+        if (voiceCallEnabled) {
+            voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), chat.phoneNumber(), callResult, voiceText);
         }
     }
 
@@ -465,6 +485,15 @@ public class ReportCoordinator {
         return lastAlertAt
                 .map(last -> last.plus(properties.getAlert().getCooldown()).isAfter(OffsetDateTime.now(zoneId)))
                 .orElse(false);
+    }
+
+    private boolean isVoiceAllowedFor(ChatSubscription chat) {
+        List<Long> allowedUserIds = properties.getAlert().getVoiceAllowedUserIds();
+        if (allowedUserIds == null || allowedUserIds.isEmpty()) {
+            return true;
+        }
+        Long userId = chat.userId();
+        return userId != null && allowedUserIds.contains(userId);
     }
 
     private String mergeStatuses(String baseStatus, String alertStatus) {

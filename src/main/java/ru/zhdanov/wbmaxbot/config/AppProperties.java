@@ -337,6 +337,7 @@ public class AppProperties {
         private boolean sendReportEachRun = true;
         private int maxRowsInMessage = 50;
         private boolean voiceCallEnabled = false;
+        private List<Long> voiceAllowedUserIds = new ArrayList<>();
 
         public int getShkThreshold() {
             return shkThreshold;
@@ -385,12 +386,24 @@ public class AppProperties {
         public void setVoiceCallEnabled(boolean voiceCallEnabled) {
             this.voiceCallEnabled = voiceCallEnabled;
         }
+
+        public List<Long> getVoiceAllowedUserIds() {
+            return voiceAllowedUserIds;
+        }
+
+        public void setVoiceAllowedUserIds(List<Long> voiceAllowedUserIds) {
+            this.voiceAllowedUserIds = voiceAllowedUserIds;
+        }
     }
 
     public static class Telephony {
         @NotBlank
         private String provider = "noop";
         private List<String> targetNumbers = new ArrayList<>();
+        private int maxAttempts = 3;
+        private int retryDelaySeconds = 15;
+        @NotNull
+        private Exolve exolve = new Exolve();
         @NotNull
         private Mango mango = new Mango();
         @NotNull
@@ -412,6 +425,30 @@ public class AppProperties {
 
         public void setTargetNumbers(List<String> targetNumbers) {
             this.targetNumbers = targetNumbers;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public int getRetryDelaySeconds() {
+            return retryDelaySeconds;
+        }
+
+        public void setRetryDelaySeconds(int retryDelaySeconds) {
+            this.retryDelaySeconds = retryDelaySeconds;
+        }
+
+        public Exolve getExolve() {
+            return exolve;
+        }
+
+        public void setExolve(Exolve exolve) {
+            this.exolve = exolve;
         }
 
         public Mango getMango() {
@@ -436,6 +473,82 @@ public class AppProperties {
 
         public void setZadarma(Zadarma zadarma) {
             this.zadarma = zadarma;
+        }
+    }
+
+    public static class Exolve {
+        @NotBlank
+        private String baseUrl = "https://api.exolve.ru";
+        private String apiKey;
+        private String sourceNumber;
+        private Integer voice = 1;
+        private Integer lang = 1;
+        private Integer volume = -19;
+        private Double speed = 1.0d;
+        private Integer emotion = 1;
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getSourceNumber() {
+            return sourceNumber;
+        }
+
+        public void setSourceNumber(String sourceNumber) {
+            this.sourceNumber = sourceNumber;
+        }
+
+        public Integer getVoice() {
+            return voice;
+        }
+
+        public void setVoice(Integer voice) {
+            this.voice = voice;
+        }
+
+        public Integer getLang() {
+            return lang;
+        }
+
+        public void setLang(Integer lang) {
+            this.lang = lang;
+        }
+
+        public Integer getVolume() {
+            return volume;
+        }
+
+        public void setVolume(Integer volume) {
+            this.volume = volume;
+        }
+
+        public Double getSpeed() {
+            return speed;
+        }
+
+        public void setSpeed(Double speed) {
+            this.speed = speed;
+        }
+
+        public Integer getEmotion() {
+            return emotion;
+        }
+
+        public void setEmotion(Integer emotion) {
+            this.emotion = emotion;
         }
     }
 

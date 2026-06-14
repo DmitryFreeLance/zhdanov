@@ -6,6 +6,7 @@ import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
 import ru.zhdanov.wbmaxbot.telephony.NoopTelephonyProvider;
 import ru.zhdanov.wbmaxbot.telephony.TelephonyProvider;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,41 @@ public class VoiceAlertService {
         if (targetNumber == null || targetNumber.isBlank()) {
             return VoiceCallResult.failure(provider.providerName(), "No target number configured");
         }
-        return provider.call(targetNumber, spokenText);
+
+        int maxAttempts = Math.max(1, properties.getTelephony().getMaxAttempts());
+        int retryDelaySeconds = Math.max(0, properties.getTelephony().getRetryDelaySeconds());
+        VoiceCallResult lastResult = VoiceCallResult.failure(provider.providerName(), "Call was not attempted");
+        List<String> attemptDetails = new ArrayList<>();
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            lastResult = provider.call(targetNumber, spokenText);
+            attemptDetails.add("attempt " + attempt + "/" + maxAttempts + ": " + safeDetails(lastResult.details()));
+            if (lastResult.success()) {
+                String details = appendAttemptSummary(lastResult.details(), attemptDetails);
+                return VoiceCallResult.success(lastResult.provider(), lastResult.externalId(), details);
+            }
+            if (attempt < maxAttempts && retryDelaySeconds > 0) {
+                try {
+                    Thread.sleep(retryDelaySeconds * 1000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return VoiceCallResult.failure(provider.providerName(), appendAttemptSummary("Retry interrupted", attemptDetails));
+                }
+            }
+        }
+
+        return VoiceCallResult.failure(lastResult.provider(), appendAttemptSummary(lastResult.details(), attemptDetails));
+    }
+
+    private String appendAttemptSummary(String details, List<String> attemptDetails) {
+        String joined = String.join("; ", attemptDetails);
+        if (details == null || details.isBlank()) {
+            return joined;
+        }
+        return details + " | " + joined;
+    }
+
+    private String safeDetails(String details) {
+        return details == null || details.isBlank() ? "no details" : details;
     }
 }

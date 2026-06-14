@@ -59,9 +59,21 @@ app:
     send-report-each-run: true
     max-rows-in-message: 50
     voice-call-enabled: false
+    voice-allowed-user-ids: []
   telephony:
     provider: noop
     target-numbers: []
+    max-attempts: 3
+    retry-delay-seconds: 15
+    exolve:
+      base-url: https://api.exolve.ru
+      api-key:
+      source-number:
+      voice: 1
+      lang: 1
+      volume: -19
+      speed: 1.0
+      emotion: 1
     mango:
       base-url: https://app.mango-office.ru
       api-key:

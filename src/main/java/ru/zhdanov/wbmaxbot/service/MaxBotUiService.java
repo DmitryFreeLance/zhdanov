@@ -132,9 +132,10 @@ public class MaxBotUiService {
         String text = """
                 📞 Настройка дозвона
 
-                Текущий номер: %s
+                Текущий номер для этого чата: %s
                 Режим дозвона: %s
 
+                При тревоге бот будет звонить именно на этот номер.
                 Можно ввести новый номер или очистить текущий.
                 """.formatted(
                 formatPhone(chat),
@@ -184,6 +185,9 @@ public class MaxBotUiService {
     public MaxOutgoingMessage buildPhonePrompt() {
         return withKeyboard("""
                 📞 Введите номер телефона для дозвона.
+
+                Этот номер сохранится для текущего пользователя/чата.
+                При тревоге бот будет звонить именно сюда.
 
                 Примеры:
                 +79991234567
@@ -390,6 +394,24 @@ public class MaxBotUiService {
             finalText += suffix;
         }
         return buildMenuMessage(finalText);
+    }
+
+    public MaxOutgoingMessage buildVoiceCallScriptMessage(String phoneNumber, boolean success, String spokenText) {
+        String header = success
+                ? "☎️ Автозвонок запущен."
+                : "☎️ Автозвонок не удался.";
+        String withPhone = hasPhone(phoneNumber)
+                ? header + "\nНомер: " + phoneNumber
+                : header;
+        return buildMenuMessage(withPhone + "\n\nТекст звонка:\n" + spokenText);
+    }
+
+    public MaxOutgoingMessage buildVoiceCallTranscriptionMessage(String phoneNumber, String status, String transcriptionText) {
+        String withPhone = hasPhone(phoneNumber)
+                ? "☎️ Результат автозвонка\nНомер: " + phoneNumber
+                : "☎️ Результат автозвонка";
+        String statusLine = status == null || status.isBlank() ? "" : "\nСтатус: " + status;
+        return buildMenuMessage(withPhone + statusLine + "\n\nРасшифровка звонка:\n" + transcriptionText);
     }
 
     private String formatInterval(ChatSubscription chat) {
