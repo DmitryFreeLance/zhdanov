@@ -16,6 +16,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -32,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class VoiceCallFollowUpService {
 
     private static final Logger log = LoggerFactory.getLogger(VoiceCallFollowUpService.class);
+    private static final DateTimeFormatter EXOLVE_RFC_1123 = DateTimeFormatter.RFC_1123_DATE_TIME;
     private static final Set<String> TERMINAL_STATUSES = Set.of(
             "completed", "no_answer", "canceled", "busy", "rejected", "failed", "modified"
     );
@@ -123,7 +127,8 @@ public class VoiceCallFollowUpService {
         }
 
         try {
-            String finalStatus = waitForFinalCallStatus(callId);
+            CallInfo finalCallInfo = waitForFinalCallInfo(callId);
+            String finalStatus = finalCallInfo.status();
             log.info("Exolve final call status received. chatId={}, phone={}, callId={}, status={}",
                     chatId, maskPhone(phoneNumber), callId, finalStatus);
             if (!TRANSCRIPT_POSSIBLE_STATUSES.contains(finalStatus)) {
@@ -139,7 +144,7 @@ public class VoiceCallFollowUpService {
                 return;
             }
 
-            String transcription = waitForTranscription(callId);
+            String transcription = waitForTranscription(callId, finalCallInfo);
             if (transcription == null || transcription.isBlank()) {
                 log.warn("Exolve transcription not available yet, sending fallback text. chatId={}, phone={}, callId={}",
                         chatId, maskPhone(phoneNumber), callId);
@@ -169,25 +174,34 @@ public class VoiceCallFollowUpService {
         }
     }
 
-    private String waitForFinalCallStatus(String callId) throws IOException, InterruptedException {
-        String status = "unknown";
+    private CallInfo waitForFinalCallInfo(String callId) throws IOException, InterruptedException {
+        CallInfo lastInfo = new CallInfo(callId, "unknown", null, null, null, null, null);
         for (int attempt = 0; attempt < 24; attempt++) {
             JsonNode body = postJson(
                     properties.getTelephony().getExolve().getBaseUrl() + "/call/v1/GetInfo",
                     Map.of("call_id", callId)
             );
-            status = body.path("status").asText("unknown");
+            String status = body.path("status").asText("unknown");
+            lastInfo = new CallInfo(
+                    callId,
+                    status,
+                    textOrNull(body, "created"),
+                    textOrNull(body, "started"),
+                    textOrNull(body, "ended"),
+                    textOrNull(body, "source"),
+                    textOrNull(body, "destination")
+            );
             log.info("Exolve GetInfo poll. callId={}, attempt={}/24, status={}, body={}",
                     callId, attempt + 1, status, truncate(body.toString()));
             if (TERMINAL_STATUSES.contains(status)) {
-                return status;
+                return lastInfo;
             }
             Thread.sleep(5000L);
         }
-        return status;
+        return lastInfo;
     }
 
-    private String waitForTranscription(String callId) throws IOException, InterruptedException {
+    private String waitForTranscription(String callId, CallInfo callInfo) throws IOException, InterruptedException {
         for (int attempt = 0; attempt < 18; attempt++) {
             JsonNode body = postJsonOrNullOnNotFound(
                     properties.getTelephony().getExolve().getBaseUrl() + "/statistics/call-record/v1/GetTranscribation",
@@ -202,6 +216,42 @@ public class VoiceCallFollowUpService {
             log.info("Exolve GetTranscribation poll. callId={}, attempt={}/18, body={}",
                     callId, attempt + 1, truncate(body.toString()));
             String text = extractTranscription(body);
+            if (text != null && !text.isBlank()) {
+                return text;
+            }
+            Thread.sleep(5000L);
+        }
+        return waitForTranscriptionFromList(callId, callInfo);
+    }
+
+    private String waitForTranscriptionFromList(String callId, CallInfo callInfo) throws IOException, InterruptedException {
+        OffsetDateTime baseTime = parseExolveTime(callInfo.endedAt());
+        if (baseTime == null) {
+            baseTime = parseExolveTime(callInfo.startedAt());
+        }
+        if (baseTime == null) {
+            baseTime = parseExolveTime(callInfo.createdAt());
+        }
+        if (baseTime == null) {
+            baseTime = OffsetDateTime.now(ZoneOffset.UTC);
+        }
+
+        OffsetDateTime dateFrom = baseTime.minusMinutes(15);
+        OffsetDateTime dateTo = baseTime.plusMinutes(15);
+
+        for (int attempt = 0; attempt < 12; attempt++) {
+            JsonNode body = postJson(
+                    properties.getTelephony().getExolve().getBaseUrl() + "/statistics/call-record/v1/GetTranscribationsList",
+                    Map.of(
+                            "date_from", dateFrom.toString(),
+                            "date_to", dateTo.toString(),
+                            "limit", 100,
+                            "offset", 0
+                    )
+            );
+            log.info("Exolve GetTranscribationsList poll. callId={}, attempt={}/12, body={}",
+                    callId, attempt + 1, truncate(body.toString()));
+            String text = extractMatchingTranscriptionFromList(body, callInfo);
             if (text != null && !text.isBlank()) {
                 return text;
             }
@@ -248,6 +298,68 @@ public class VoiceCallFollowUpService {
             return new BigInteger(callId);
         }
         return callId;
+    }
+
+    private String textOrNull(JsonNode body, String fieldName) {
+        JsonNode node = body.path(fieldName);
+        if (node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String text = node.asText();
+        return text == null || text.isBlank() ? null : text;
+    }
+
+    private OffsetDateTime parseExolveTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value, EXOLVE_RFC_1123);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String extractMatchingTranscriptionFromList(JsonNode body, CallInfo callInfo) {
+        JsonNode list = body.path("transcribation");
+        if (!list.isArray()) {
+            return null;
+        }
+
+        String sourceDigits = digits(callInfo.source());
+        String destinationDigits = digits(callInfo.destination());
+
+        for (JsonNode item : list) {
+            String numberA = digits(textOrNull(item, "number_a"));
+            String numberB = digits(textOrNull(item, "number_b"));
+            String redirectNumber = digits(textOrNull(item, "redirect_number"));
+            boolean matchesDirect = matchesNumber(numberA, sourceDigits) && matchesNumber(numberB, destinationDigits);
+            boolean matchesRedirect = matchesNumber(numberA, sourceDigits) && matchesNumber(redirectNumber, destinationDigits);
+            boolean matchesReverse = matchesNumber(numberA, destinationDigits) && matchesNumber(numberB, sourceDigits);
+            if (!matchesDirect && !matchesRedirect && !matchesReverse) {
+                continue;
+            }
+
+            String text = extractTranscription(item);
+            if (text != null && !text.isBlank()) {
+                log.info("Matched Exolve transcription from list. callId={}, uid={}, numberA={}, numberB={}, redirectNumber={}",
+                        callInfo.callId(), textOrNull(item, "uid"), numberA, numberB, redirectNumber);
+                return text;
+            }
+        }
+        return null;
+    }
+
+    private boolean matchesNumber(String left, String right) {
+        return left != null && right != null && !left.isBlank() && !right.isBlank() && left.equals(right);
+    }
+
+    private String digits(String value) {
+        if (value == null) {
+            return null;
+        }
+        String digits = value.replaceAll("[^0-9]", "");
+        return digits.isBlank() ? null : digits;
     }
 
     private String extractTranscription(JsonNode body) {
@@ -333,5 +445,14 @@ public class VoiceCallFollowUpService {
             return null;
         }
         return value.length() > 800 ? value.substring(0, 800) + "..." : value;
+    }
+
+    private record CallInfo(String callId,
+                            String status,
+                            String createdAt,
+                            String startedAt,
+                            String endedAt,
+                            String source,
+                            String destination) {
     }
 }
