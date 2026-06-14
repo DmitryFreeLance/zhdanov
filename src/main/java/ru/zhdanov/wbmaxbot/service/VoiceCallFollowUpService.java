@@ -366,27 +366,11 @@ public class VoiceCallFollowUpService {
         JsonNode chunksNode = body.path("chunks");
         List<Chunk> chunks = new ArrayList<>();
 
-        if (chunksNode.isArray()) {
-            for (JsonNode item : chunksNode) {
-                addChunk(chunks, item);
-            }
-        } else if (chunksNode.isObject()) {
-            if (chunksNode.has("text")) {
-                addChunk(chunks, chunksNode);
-            } else if (chunksNode.has("chunks") && chunksNode.path("chunks").isArray()) {
-                for (JsonNode item : chunksNode.path("chunks")) {
-                    addChunk(chunks, item);
-                }
-            }
-        }
+        collectChunks(chunks, chunksNode);
 
-        if (chunks.isEmpty()) {
-            JsonNode transcribationNode = body.path("transcribation");
-            if (transcribationNode.isArray()) {
-                for (JsonNode item : transcribationNode) {
-                    addChunk(chunks, item);
-                }
-            }
+        JsonNode transcribationNode = body.path("transcribation");
+        if (chunks.isEmpty() && !transcribationNode.isMissingNode() && !transcribationNode.isNull()) {
+            collectChunks(chunks, transcribationNode);
         }
 
         chunks.sort(Comparator.comparingLong(Chunk::startTime));
@@ -404,6 +388,30 @@ public class VoiceCallFollowUpService {
                     .append(chunk.text());
         }
         return result.toString().trim();
+    }
+
+    private void collectChunks(List<Chunk> chunks, JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectChunks(chunks, item);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        if (node.has("text")) {
+            addChunk(chunks, node);
+        }
+        if (node.has("chunks")) {
+            collectChunks(chunks, node.path("chunks"));
+        }
+        if (node.has("transcribation")) {
+            collectChunks(chunks, node.path("transcribation"));
+        }
     }
 
     private void addChunk(List<Chunk> chunks, JsonNode item) {
