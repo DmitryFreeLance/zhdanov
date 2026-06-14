@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import ru.zhdanov.wbmaxbot.model.ChatSubscription;
 import ru.zhdanov.wbmaxbot.model.ChatLinkedWbAccount;
 import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
+import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
 
 import java.nio.file.Files;
 import java.util.Locale;
@@ -26,6 +27,8 @@ public class MaxUpdateHandler {
     private final WbStorageStateImportService wbStorageStateImportService;
     private final WildberriesScraper wildberriesScraper;
     private final MaxBotUiService maxBotUiService;
+    private final VoiceAlertService voiceAlertService;
+    private final VoiceCallFollowUpService voiceCallFollowUpService;
     private final ru.zhdanov.wbmaxbot.config.AppProperties properties;
 
     public MaxUpdateHandler(MaxMessagingService maxMessagingService,
@@ -37,6 +40,8 @@ public class MaxUpdateHandler {
                             WbStorageStateImportService wbStorageStateImportService,
                             WildberriesScraper wildberriesScraper,
                             MaxBotUiService maxBotUiService,
+                            VoiceAlertService voiceAlertService,
+                            VoiceCallFollowUpService voiceCallFollowUpService,
                             ru.zhdanov.wbmaxbot.config.AppProperties properties) {
         this.maxMessagingService = maxMessagingService;
         this.reportCoordinator = reportCoordinator;
@@ -47,6 +52,8 @@ public class MaxUpdateHandler {
         this.wbStorageStateImportService = wbStorageStateImportService;
         this.wildberriesScraper = wildberriesScraper;
         this.maxBotUiService = maxBotUiService;
+        this.voiceAlertService = voiceAlertService;
+        this.voiceCallFollowUpService = voiceCallFollowUpService;
         this.properties = properties;
     }
 
@@ -107,6 +114,10 @@ public class MaxUpdateHandler {
             case "/report" -> {
                 cancelPendingInput(chat);
                 reportCoordinator.executeManualRun(chatId);
+            }
+            case "/call" -> {
+                cancelPendingInput(chat);
+                triggerManualVoiceCall(chat, userId);
             }
             case "/menu" -> {
                 cancelPendingInput(chat);
@@ -314,12 +325,45 @@ public class MaxUpdateHandler {
         try {
             wbLoginFlowService.resendCode(chat.pendingWbAuthFlowId());
             maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildWbAuthResentMessage(),
-                    maxBotUiService.buildWbAuthCodePrompt(chat.pendingWbAuthPhoneNumber()));
+                maxBotUiService.buildWbAuthCodePrompt(chat.pendingWbAuthPhoneNumber()));
         } catch (IllegalArgumentException | IllegalStateException e) {
             chatSettingsService.clearPendingWbAuth(chatId);
             maxMessagingService.answerCallback(chatId, callbackId, e.getMessage(),
                     maxBotUiService.buildAccountsMenu(chatSettingsService.getRequired(chatId), wbAccountService.listAccounts(chatId)));
         }
+    }
+
+    private void triggerManualVoiceCall(ChatSubscription chat, Long userId) {
+        long chatId = chat.chatId();
+        if (!isVoiceAllowedFor(userId)) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Команда /call доступна только для тестового пользователя."));
+            return;
+        }
+        if (!"exolve".equalsIgnoreCase(properties.getTelephony().getProvider())) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Команда /call сейчас поддерживается только для Exolve."));
+            return;
+        }
+        if (chat.phoneNumber() == null || chat.phoneNumber().isBlank()) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Сначала укажи номер в разделе Телефон."));
+            return;
+        }
+        if (properties.getTelephony().getExolve().getServiceId() == null
+                || properties.getTelephony().getExolve().getServiceId().isBlank()) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Для /call нужен настроенный APP_TELEPHONY_EXOLVE_SERVICE_ID."));
+            return;
+        }
+
+        maxMessagingService.sendToChat(chatId, "Запускаю тестовый звонок...");
+        VoiceCallResult callResult = voiceAlertService.callTarget(chat.phoneNumber(), "");
+        voiceCallFollowUpService.sendCallResultAsync(chatId, chat.phoneNumber(), callResult, "");
+    }
+
+    private boolean isVoiceAllowedFor(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        var allowed = properties.getAlert().getVoiceAllowedUserIds();
+        return allowed != null && allowed.contains(userId);
     }
 
     private void confirmWbAuthCode(ChatSubscription chat, String rawText) {
