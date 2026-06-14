@@ -402,6 +402,7 @@ public class AppProperties {
         private List<String> targetNumbers = new ArrayList<>();
         private int maxAttempts = 3;
         private int retryDelaySeconds = 15;
+        private int followUpThreads = 6;
         @NotNull
         private Exolve exolve = new Exolve();
         @NotNull
@@ -441,6 +442,14 @@ public class AppProperties {
 
         public void setRetryDelaySeconds(int retryDelaySeconds) {
             this.retryDelaySeconds = retryDelaySeconds;
+        }
+
+        public int getFollowUpThreads() {
+            return followUpThreads;
+        }
+
+        public void setFollowUpThreads(int followUpThreads) {
+            this.followUpThreads = followUpThreads;
         }
 
         public Exolve getExolve() {

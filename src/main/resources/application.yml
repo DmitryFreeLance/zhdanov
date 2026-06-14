@@ -65,6 +65,7 @@ app:
     target-numbers: []
     max-attempts: 3
     retry-delay-seconds: 15
+    follow-up-threads: 6
     exolve:
       base-url: https://api.exolve.ru
       api-key:

@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -49,6 +50,7 @@ public class VoiceCallFollowUpService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final ExecutorService executorService;
+    private final Set<Long> activeChatIds;
 
     public VoiceCallFollowUpService(AppProperties properties,
                                     MaxMessagingService maxMessagingService,
@@ -61,7 +63,9 @@ public class VoiceCallFollowUpService {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
-        this.executorService = Executors.newFixedThreadPool(2, new ThreadFactory() {
+        this.activeChatIds = ConcurrentHashMap.newKeySet();
+        int followUpThreads = Math.max(2, properties.getTelephony().getFollowUpThreads());
+        this.executorService = Executors.newFixedThreadPool(followUpThreads, new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
             @Override
@@ -71,6 +75,15 @@ public class VoiceCallFollowUpService {
                 return thread;
             }
         });
+        log.info("Voice call follow-up executor initialized with {} threads", followUpThreads);
+    }
+
+    public boolean tryBeginCallFlow(long chatId) {
+        return activeChatIds.add(chatId);
+    }
+
+    public boolean isCallFlowActive(long chatId) {
+        return activeChatIds.contains(chatId);
     }
 
     public void sendCallResultAsync(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
@@ -86,47 +99,47 @@ public class VoiceCallFollowUpService {
 
     private void doSendCallResult(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
         boolean hasFallbackText = fallbackText != null && !fallbackText.isBlank();
-        if (!callResult.success()) {
-            log.warn("Voice call did not start successfully. chatId={}, phone={}, provider={}, details={}",
-                    chatId, maskPhone(phoneNumber), callResult.provider(), truncate(callResult.details()));
-            maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallFollowUpMessage(
-                            phoneNumber,
-                            "failed",
-                            hasFallbackText ? "Текст звонка" : "Детали звонка",
-                            hasFallbackText ? fallbackText : "Не удалось запустить звонок."
-                    ));
-            return;
-        }
-
-        if (!"exolve".equalsIgnoreCase(callResult.provider())) {
-            log.info("Voice call follow-up skipped for non-Exolve provider. chatId={}, phone={}, provider={}",
-                    chatId, maskPhone(phoneNumber), callResult.provider());
-            maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallFollowUpMessage(
-                            phoneNumber,
-                            "completed",
-                            hasFallbackText ? "Текст звонка" : "Детали звонка",
-                            hasFallbackText ? fallbackText : "Звонок завершён."
-                    ));
-            return;
-        }
-
-        String callId = callResult.externalId();
-        if (callId == null || callId.isBlank()) {
-            log.warn("Voice call follow-up cannot continue without callId. chatId={}, phone={}",
-                    chatId, maskPhone(phoneNumber));
-            maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallFollowUpMessage(
-                            phoneNumber,
-                            "unknown",
-                            hasFallbackText ? "Текст звонка" : "Детали звонка",
-                            hasFallbackText ? fallbackText : "Не удалось определить идентификатор звонка."
-                    ));
-            return;
-        }
-
         try {
+            if (!callResult.success()) {
+                log.warn("Voice call did not start successfully. chatId={}, phone={}, provider={}, details={}",
+                        chatId, maskPhone(phoneNumber), callResult.provider(), truncate(callResult.details()));
+                maxMessagingService.sendToChat(chatId,
+                        maxBotUiService.buildVoiceCallFollowUpMessage(
+                                phoneNumber,
+                                "failed",
+                                hasFallbackText ? "Текст звонка" : "Детали звонка",
+                                hasFallbackText ? fallbackText : "Не удалось запустить звонок."
+                        ));
+                return;
+            }
+
+            if (!"exolve".equalsIgnoreCase(callResult.provider())) {
+                log.info("Voice call follow-up skipped for non-Exolve provider. chatId={}, phone={}, provider={}",
+                        chatId, maskPhone(phoneNumber), callResult.provider());
+                maxMessagingService.sendToChat(chatId,
+                        maxBotUiService.buildVoiceCallFollowUpMessage(
+                                phoneNumber,
+                                "completed",
+                                hasFallbackText ? "Текст звонка" : "Детали звонка",
+                                hasFallbackText ? fallbackText : "Звонок завершён."
+                        ));
+                return;
+            }
+
+            String callId = callResult.externalId();
+            if (callId == null || callId.isBlank()) {
+                log.warn("Voice call follow-up cannot continue without callId. chatId={}, phone={}",
+                        chatId, maskPhone(phoneNumber));
+                maxMessagingService.sendToChat(chatId,
+                        maxBotUiService.buildVoiceCallFollowUpMessage(
+                                phoneNumber,
+                                "unknown",
+                                hasFallbackText ? "Текст звонка" : "Детали звонка",
+                                hasFallbackText ? fallbackText : "Не удалось определить идентификатор звонка."
+                        ));
+                return;
+            }
+
             CallInfo finalCallInfo = waitForFinalCallInfo(callId);
             String finalStatus = finalCallInfo.status();
             log.info("Exolve final call status received. chatId={}, phone={}, callId={}, status={}",
@@ -163,7 +176,7 @@ public class VoiceCallFollowUpService {
             }
         } catch (Exception e) {
             log.warn("Failed to fetch Exolve call follow-up. chatId={}, phone={}, callId={}, error={}",
-                    chatId, maskPhone(phoneNumber), callId, e.getMessage(), e);
+                    chatId, maskPhone(phoneNumber), callResult.externalId(), e.getMessage(), e);
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallFollowUpMessage(
                             phoneNumber,
@@ -171,6 +184,8 @@ public class VoiceCallFollowUpService {
                             hasFallbackText ? "Текст звонка" : "Детали звонка",
                             hasFallbackText ? fallbackText : "Не удалось получить данные по звонку."
                     ));
+        } finally {
+            activeChatIds.remove(chatId);
         }
     }
 

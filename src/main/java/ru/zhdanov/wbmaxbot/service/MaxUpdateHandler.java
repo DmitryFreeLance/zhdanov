@@ -352,6 +352,10 @@ public class MaxUpdateHandler {
             maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Для /call нужен настроенный APP_TELEPHONY_EXOLVE_SERVICE_ID."));
             return;
         }
+        if (!voiceCallFollowUpService.tryBeginCallFlow(chatId)) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Предыдущий звонок ещё обрабатывается. Подожди расшифровку."));
+            return;
+        }
 
         maxMessagingService.sendToChat(chatId, "Запускаю тестовый звонок...");
         VoiceCallResult callResult = voiceAlertService.callTarget(chat.phoneNumber(), "");

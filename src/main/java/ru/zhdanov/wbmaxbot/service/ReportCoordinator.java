@@ -417,9 +417,19 @@ public class ReportCoordinator {
         String voiceText = shouldUseSilentExolveMessage()
                 ? ""
                 : notificationFormatter.buildVoiceText(activeTriggers);
-        VoiceCallResult callResult = voiceCallEnabled
-                ? voiceAlertService.callTarget(chat.phoneNumber(), voiceText)
-                : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+        boolean callFlowReserved = false;
+        VoiceCallResult callResult;
+        if (!voiceCallEnabled) {
+            callResult = VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+        } else if (!voiceCallFollowUpService.tryBeginCallFlow(chat.chatId())) {
+            log.info("Skipping voice call because previous follow-up is still active. chatId={}, phone={}",
+                    chat.chatId(), chat.phoneNumber());
+            callResult = VoiceCallResult.failure(properties.getTelephony().getProvider(),
+                    "Previous voice call follow-up is still in progress");
+        } else {
+            callFlowReserved = true;
+            callResult = voiceAlertService.callTarget(chat.phoneNumber(), voiceText);
+        }
 
         for (AlertTrigger trigger : activeTriggers) {
             String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled, maskPhone(account.phoneNumber()));
@@ -446,7 +456,7 @@ public class ReportCoordinator {
             );
         }
 
-        if (voiceCallEnabled) {
+        if (voiceCallEnabled && callFlowReserved) {
             voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), chat.phoneNumber(), callResult, voiceText);
         }
     }
