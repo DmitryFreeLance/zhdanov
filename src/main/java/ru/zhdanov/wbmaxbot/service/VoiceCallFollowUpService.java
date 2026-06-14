@@ -81,11 +81,17 @@ public class VoiceCallFollowUpService {
     }
 
     private void doSendCallResult(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
+        boolean hasFallbackText = fallbackText != null && !fallbackText.isBlank();
         if (!callResult.success()) {
             log.warn("Voice call did not start successfully. chatId={}, phone={}, provider={}, details={}",
                     chatId, maskPhone(phoneNumber), callResult.provider(), truncate(callResult.details()));
             maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, "failed", fallbackText));
+                    maxBotUiService.buildVoiceCallFollowUpMessage(
+                            phoneNumber,
+                            "failed",
+                            hasFallbackText ? "Текст звонка" : "Детали звонка",
+                            hasFallbackText ? fallbackText : "Не удалось запустить звонок."
+                    ));
             return;
         }
 
@@ -93,7 +99,12 @@ public class VoiceCallFollowUpService {
             log.info("Voice call follow-up skipped for non-Exolve provider. chatId={}, phone={}, provider={}",
                     chatId, maskPhone(phoneNumber), callResult.provider());
             maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, "completed", fallbackText));
+                    maxBotUiService.buildVoiceCallFollowUpMessage(
+                            phoneNumber,
+                            "completed",
+                            hasFallbackText ? "Текст звонка" : "Детали звонка",
+                            hasFallbackText ? fallbackText : "Звонок завершён."
+                    ));
             return;
         }
 
@@ -102,7 +113,12 @@ public class VoiceCallFollowUpService {
             log.warn("Voice call follow-up cannot continue without callId. chatId={}, phone={}",
                     chatId, maskPhone(phoneNumber));
             maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, "unknown", fallbackText));
+                    maxBotUiService.buildVoiceCallFollowUpMessage(
+                            phoneNumber,
+                            "unknown",
+                            hasFallbackText ? "Текст звонка" : "Детали звонка",
+                            hasFallbackText ? fallbackText : "Не удалось определить идентификатор звонка."
+                    ));
             return;
         }
 
@@ -114,9 +130,10 @@ public class VoiceCallFollowUpService {
                 log.warn("Exolve transcription skipped because final status is not eligible. chatId={}, phone={}, callId={}, status={}",
                         chatId, maskPhone(phoneNumber), callId, finalStatus);
                 maxMessagingService.sendToChat(chatId,
-                        maxBotUiService.buildVoiceCallTranscriptionMessage(
+                        maxBotUiService.buildVoiceCallFollowUpMessage(
                                 phoneNumber,
                                 finalStatus,
+                                "Детали звонка",
                                 "Расшифровка недоступна. Финальный статус звонка: " + finalStatus
                         ));
                 return;
@@ -126,21 +143,28 @@ public class VoiceCallFollowUpService {
             if (transcription == null || transcription.isBlank()) {
                 log.warn("Exolve transcription not available yet, sending fallback text. chatId={}, phone={}, callId={}",
                         chatId, maskPhone(phoneNumber), callId);
-                transcription = "Расшифровка пока недоступна. Исходный текст звонка:\n" + fallbackText;
+                maxMessagingService.sendToChat(chatId,
+                        maxBotUiService.buildVoiceCallFollowUpMessage(
+                                phoneNumber,
+                                finalStatus,
+                                hasFallbackText ? "Текст звонка" : "Детали звонка",
+                                hasFallbackText ? fallbackText : "Расшифровка пока недоступна."
+                        ));
             } else {
                 log.info("Exolve transcription received. chatId={}, phone={}, callId={}, length={}",
                         chatId, maskPhone(phoneNumber), callId, transcription.length());
+                maxMessagingService.sendToChat(chatId,
+                        maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, finalStatus, transcription));
             }
-            maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, finalStatus, transcription));
         } catch (Exception e) {
             log.warn("Failed to fetch Exolve call follow-up. chatId={}, phone={}, callId={}, error={}",
                     chatId, maskPhone(phoneNumber), callId, e.getMessage(), e);
             maxMessagingService.sendToChat(chatId,
-                    maxBotUiService.buildVoiceCallTranscriptionMessage(
+                    maxBotUiService.buildVoiceCallFollowUpMessage(
                             phoneNumber,
                             "unknown",
-                            "Не удалось получить расшифровку звонка. Исходный текст звонка:\n" + fallbackText
+                            hasFallbackText ? "Текст звонка" : "Детали звонка",
+                            hasFallbackText ? fallbackText : "Не удалось получить данные по звонку."
                     ));
         }
     }

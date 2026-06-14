@@ -58,12 +58,19 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("source", normalizedSource);
         payload.put("destination", normalizedDestination);
-        payload.put("tts", buildTtsPayload(exolve, spokenText));
+        String mode;
+        if (hasText(exolve.getServiceId())) {
+            payload.put("service_id", exolve.getServiceId().trim());
+            mode = "service_id";
+        } else {
+            payload.put("tts", buildTtsPayload(exolve, spokenText));
+            mode = "tts";
+        }
 
         try {
             String json = objectMapper.writeValueAsString(payload);
-            log.info("Starting Exolve voice call. source={}, destination={}, textLength={}",
-                    maskPhone(normalizedSource), maskPhone(normalizedDestination), spokenText == null ? 0 : spokenText.length());
+            log.info("Starting Exolve voice call. source={}, destination={}, mode={}, textLength={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), mode, spokenText == null ? 0 : spokenText.length());
             HttpRequest request = HttpRequest.newBuilder(URI.create(exolve.getBaseUrl() + MAKE_VOICE_MESSAGE_PATH))
                     .header("Authorization", "Bearer " + exolve.getApiKey().trim())
                     .header("Content-Type", "application/json")
@@ -72,8 +79,8 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            log.info("Exolve MakeVoiceMessage response. source={}, destination={}, statusCode={}, body={}",
-                    maskPhone(normalizedSource), maskPhone(normalizedDestination), response.statusCode(), truncate(response.body()));
+            log.info("Exolve MakeVoiceMessage response. source={}, destination={}, mode={}, statusCode={}, body={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), mode, response.statusCode(), truncate(response.body()));
             if (response.statusCode() / 100 != 2) {
                 return VoiceCallResult.failure(
                         providerName(),
@@ -86,17 +93,17 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
             if (!hasText(callId)) {
                 return VoiceCallResult.failure(providerName(), "MTS Exolve response did not contain call_id: " + response.body());
             }
-            log.info("Exolve voice call accepted. callId={}, source={}, destination={}",
-                    callId, maskPhone(normalizedSource), maskPhone(normalizedDestination));
+            log.info("Exolve voice call accepted. callId={}, source={}, destination={}, mode={}",
+                    callId, maskPhone(normalizedSource), maskPhone(normalizedDestination), mode);
             return VoiceCallResult.success(providerName(), callId, response.body());
         } catch (IOException e) {
-            log.warn("Exolve voice call IO failure. source={}, destination={}, error={}",
-                    maskPhone(normalizedSource), maskPhone(normalizedDestination), e.getMessage());
+            log.warn("Exolve voice call IO failure. source={}, destination={}, mode={}, error={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), mode, e.getMessage());
             return VoiceCallResult.failure(providerName(), e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.warn("Exolve voice call interrupted. source={}, destination={}, error={}",
-                    maskPhone(normalizedSource), maskPhone(normalizedDestination), e.getMessage());
+            log.warn("Exolve voice call interrupted. source={}, destination={}, mode={}, error={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), mode, e.getMessage());
             return VoiceCallResult.failure(providerName(), e.getMessage());
         }
     }

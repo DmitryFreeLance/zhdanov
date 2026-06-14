@@ -481,6 +481,7 @@ public class AppProperties {
         private String baseUrl = "https://api.exolve.ru";
         private String apiKey;
         private String sourceNumber;
+        private String serviceId;
         private Integer voice = 1;
         private Integer lang = 1;
         private Integer volume = -19;
@@ -509,6 +510,14 @@ public class AppProperties {
 
         public void setSourceNumber(String sourceNumber) {
             this.sourceNumber = sourceNumber;
+        }
+
+        public String getServiceId() {
+            return serviceId;
+        }
+
+        public void setServiceId(String serviceId) {
+            this.serviceId = serviceId;
         }
 
         public Integer getVoice() {

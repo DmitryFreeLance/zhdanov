@@ -414,7 +414,9 @@ public class ReportCoordinator {
         boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled()
                 && chat.callEnabled()
                 && isVoiceAllowedFor(chat);
-        String voiceText = notificationFormatter.buildVoiceText(activeTriggers);
+        String voiceText = shouldUseSilentExolveMessage()
+                ? ""
+                : notificationFormatter.buildVoiceText(activeTriggers);
         VoiceCallResult callResult = voiceCallEnabled
                 ? voiceAlertService.callTarget(chat.phoneNumber(), voiceText)
                 : VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
@@ -447,6 +449,12 @@ public class ReportCoordinator {
         if (voiceCallEnabled) {
             voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), chat.phoneNumber(), callResult, voiceText);
         }
+    }
+
+    private boolean shouldUseSilentExolveMessage() {
+        return "exolve".equalsIgnoreCase(properties.getTelephony().getProvider())
+                && properties.getTelephony().getExolve().getServiceId() != null
+                && !properties.getTelephony().getExolve().getServiceId().isBlank();
     }
 
     private List<AlertTrigger> evaluateTriggers(ScrapeResult result, ChatSubscription chat) {

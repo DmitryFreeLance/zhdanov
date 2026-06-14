@@ -407,11 +407,18 @@ public class MaxBotUiService {
     }
 
     public MaxOutgoingMessage buildVoiceCallTranscriptionMessage(String phoneNumber, String status, String transcriptionText) {
+        return buildVoiceCallFollowUpMessage(phoneNumber, status, "Расшифровка звонка", transcriptionText);
+    }
+
+    public MaxOutgoingMessage buildVoiceCallFollowUpMessage(String phoneNumber,
+                                                            String status,
+                                                            String sectionTitle,
+                                                            String text) {
         String withPhone = hasPhone(phoneNumber)
                 ? "☎️ Результат автозвонка\nНомер: " + phoneNumber
                 : "☎️ Результат автозвонка";
         String statusLine = status == null || status.isBlank() ? "" : "\nСтатус: " + status;
-        return buildMenuMessage(withPhone + statusLine + "\n\nРасшифровка звонка:\n" + transcriptionText);
+        return buildMenuMessage(withPhone + statusLine + "\n\n" + sectionTitle + ":\n" + text);
     }
 
     private String formatInterval(ChatSubscription chat) {
