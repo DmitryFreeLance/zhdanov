@@ -2,6 +2,8 @@ package ru.zhdanov.wbmaxbot.telephony;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import ru.zhdanov.wbmaxbot.config.AppProperties;
 import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
@@ -19,6 +21,7 @@ import java.util.Map;
 public class ExolveTelephonyProvider implements TelephonyProvider {
 
     private static final String MAKE_VOICE_MESSAGE_PATH = "/call/v1/MakeVoiceMessage";
+    private static final Logger log = LoggerFactory.getLogger(ExolveTelephonyProvider.class);
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
@@ -50,13 +53,17 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
         }
 
         AppProperties.Exolve exolve = properties.getTelephony().getExolve();
+        String normalizedSource = normalizePhoneNumber(exolve.getSourceNumber());
+        String normalizedDestination = normalizePhoneNumber(targetNumber);
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("source", normalizePhoneNumber(exolve.getSourceNumber()));
-        payload.put("destination", normalizePhoneNumber(targetNumber));
+        payload.put("source", normalizedSource);
+        payload.put("destination", normalizedDestination);
         payload.put("tts", buildTtsPayload(exolve, spokenText));
 
         try {
             String json = objectMapper.writeValueAsString(payload);
+            log.info("Starting Exolve voice call. source={}, destination={}, textLength={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), spokenText == null ? 0 : spokenText.length());
             HttpRequest request = HttpRequest.newBuilder(URI.create(exolve.getBaseUrl() + MAKE_VOICE_MESSAGE_PATH))
                     .header("Authorization", "Bearer " + exolve.getApiKey().trim())
                     .header("Content-Type", "application/json")
@@ -65,6 +72,8 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            log.info("Exolve MakeVoiceMessage response. source={}, destination={}, statusCode={}, body={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), response.statusCode(), truncate(response.body()));
             if (response.statusCode() / 100 != 2) {
                 return VoiceCallResult.failure(
                         providerName(),
@@ -77,11 +86,17 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
             if (!hasText(callId)) {
                 return VoiceCallResult.failure(providerName(), "MTS Exolve response did not contain call_id: " + response.body());
             }
+            log.info("Exolve voice call accepted. callId={}, source={}, destination={}",
+                    callId, maskPhone(normalizedSource), maskPhone(normalizedDestination));
             return VoiceCallResult.success(providerName(), callId, response.body());
         } catch (IOException e) {
+            log.warn("Exolve voice call IO failure. source={}, destination={}, error={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), e.getMessage());
             return VoiceCallResult.failure(providerName(), e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            log.warn("Exolve voice call interrupted. source={}, destination={}, error={}",
+                    maskPhone(normalizedSource), maskPhone(normalizedDestination), e.getMessage());
             return VoiceCallResult.failure(providerName(), e.getMessage());
         }
     }
@@ -114,5 +129,20 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String maskPhone(String value) {
+        String digits = value == null ? "" : value.replaceAll("[^0-9]", "");
+        if (digits.length() < 4) {
+            return value;
+        }
+        return "+" + digits.charAt(0) + "***" + digits.substring(digits.length() - 4);
+    }
+
+    private String truncate(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.length() > 500 ? value.substring(0, 500) + "..." : value;
     }
 }

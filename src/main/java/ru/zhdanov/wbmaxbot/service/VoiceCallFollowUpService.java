@@ -70,6 +70,8 @@ public class VoiceCallFollowUpService {
     }
 
     public void sendCallResultAsync(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
+        log.info("Scheduling voice call follow-up. chatId={}, phone={}, provider={}, success={}, callId={}",
+                chatId, maskPhone(phoneNumber), callResult.provider(), callResult.success(), callResult.externalId());
         executorService.submit(() -> doSendCallResult(chatId, phoneNumber, callResult, fallbackText));
     }
 
@@ -80,12 +82,16 @@ public class VoiceCallFollowUpService {
 
     private void doSendCallResult(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
         if (!callResult.success()) {
+            log.warn("Voice call did not start successfully. chatId={}, phone={}, provider={}, details={}",
+                    chatId, maskPhone(phoneNumber), callResult.provider(), truncate(callResult.details()));
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, "failed", fallbackText));
             return;
         }
 
         if (!"exolve".equalsIgnoreCase(callResult.provider())) {
+            log.info("Voice call follow-up skipped for non-Exolve provider. chatId={}, phone={}, provider={}",
+                    chatId, maskPhone(phoneNumber), callResult.provider());
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, "completed", fallbackText));
             return;
@@ -93,6 +99,8 @@ public class VoiceCallFollowUpService {
 
         String callId = callResult.externalId();
         if (callId == null || callId.isBlank()) {
+            log.warn("Voice call follow-up cannot continue without callId. chatId={}, phone={}",
+                    chatId, maskPhone(phoneNumber));
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, "unknown", fallbackText));
             return;
@@ -100,7 +108,11 @@ public class VoiceCallFollowUpService {
 
         try {
             String finalStatus = waitForFinalCallStatus(callId);
+            log.info("Exolve final call status received. chatId={}, phone={}, callId={}, status={}",
+                    chatId, maskPhone(phoneNumber), callId, finalStatus);
             if (!TRANSCRIPT_POSSIBLE_STATUSES.contains(finalStatus)) {
+                log.warn("Exolve transcription skipped because final status is not eligible. chatId={}, phone={}, callId={}, status={}",
+                        chatId, maskPhone(phoneNumber), callId, finalStatus);
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildVoiceCallTranscriptionMessage(
                                 phoneNumber,
@@ -112,12 +124,18 @@ public class VoiceCallFollowUpService {
 
             String transcription = waitForTranscription(callId);
             if (transcription == null || transcription.isBlank()) {
+                log.warn("Exolve transcription not available yet, sending fallback text. chatId={}, phone={}, callId={}",
+                        chatId, maskPhone(phoneNumber), callId);
                 transcription = "Расшифровка пока недоступна. Исходный текст звонка:\n" + fallbackText;
+            } else {
+                log.info("Exolve transcription received. chatId={}, phone={}, callId={}, length={}",
+                        chatId, maskPhone(phoneNumber), callId, transcription.length());
             }
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, finalStatus, transcription));
         } catch (Exception e) {
-            log.warn("Failed to fetch Exolve call follow-up for call {}", callId, e);
+            log.warn("Failed to fetch Exolve call follow-up. chatId={}, phone={}, callId={}, error={}",
+                    chatId, maskPhone(phoneNumber), callId, e.getMessage(), e);
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallTranscriptionMessage(
                             phoneNumber,
@@ -135,6 +153,8 @@ public class VoiceCallFollowUpService {
                     Map.of("call_id", callId)
             );
             status = body.path("status").asText("unknown");
+            log.info("Exolve GetInfo poll. callId={}, attempt={}/24, status={}, body={}",
+                    callId, attempt + 1, status, truncate(body.toString()));
             if (TERMINAL_STATUSES.contains(status)) {
                 return status;
             }
@@ -149,6 +169,8 @@ public class VoiceCallFollowUpService {
                     properties.getTelephony().getExolve().getBaseUrl() + "/statistics/call-record/v1/GetTranscribation",
                     Map.of("uid", parseUid(callId))
             );
+            log.info("Exolve GetTranscribation poll. callId={}, attempt={}/12, body={}",
+                    callId, attempt + 1, truncate(body.toString()));
             String text = extractTranscription(body);
             if (text != null && !text.isBlank()) {
                 return text;
@@ -248,5 +270,20 @@ public class VoiceCallFollowUpService {
     }
 
     private record Chunk(long channelTag, String text, long startTime) {
+    }
+
+    private String maskPhone(String value) {
+        String digits = value == null ? "" : value.replaceAll("[^0-9]", "");
+        if (digits.length() < 4) {
+            return value;
+        }
+        return "+" + digits.charAt(0) + "***" + digits.substring(digits.length() - 4);
+    }
+
+    private String truncate(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.length() > 800 ? value.substring(0, 800) + "..." : value;
     }
 }
