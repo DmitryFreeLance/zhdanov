@@ -27,12 +27,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -43,6 +45,7 @@ public class ReportCoordinator {
     private static final Logger log = LoggerFactory.getLogger(ReportCoordinator.class);
     private static final int MANUAL_REPORT_TIMEOUT_SECONDS = 120;
     private static final int SCHEDULED_REPORT_TIMEOUT_SECONDS = 180;
+    private static final int SCHEDULED_ACCOUNT_TIMEOUT_SECONDS = 90;
     private static final int SCRAPE_ATTEMPTS = 2;
 
     private final AppProperties properties;
@@ -60,6 +63,7 @@ public class ReportCoordinator {
     private final ObjectMapper objectMapper;
     private final ZoneId zoneId;
     private final ExecutorService scheduledReportExecutor;
+    private final ExecutorService scheduledAccountExecutor;
     private final ExecutorService manualReportExecutor;
     private final ScheduledExecutorService reportWatchdogExecutor;
     private final Map<Long, ManualRunState> manualRunStates;
@@ -102,6 +106,16 @@ public class ReportCoordinator {
             @Override
             public Thread newThread(Runnable runnable) {
                 Thread thread = new Thread(runnable, "wb-scheduled-report-" + index.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+        this.scheduledAccountExecutor = Executors.newCachedThreadPool(new ThreadFactory() {
+            private final AtomicInteger index = new AtomicInteger(1);
+
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "wb-scheduled-account-" + index.getAndIncrement());
                 thread.setDaemon(true);
                 return thread;
             }
@@ -176,6 +190,7 @@ public class ReportCoordinator {
     @PreDestroy
     public void shutdownExecutor() {
         scheduledReportExecutor.shutdownNow();
+        scheduledAccountExecutor.shutdownNow();
         manualReportExecutor.shutdownNow();
         reportWatchdogExecutor.shutdownNow();
     }
@@ -297,7 +312,7 @@ public class ReportCoordinator {
         for (ScheduledAccountDispatch dispatch : dispatches.values()) {
             ChatLinkedWbAccount account = dispatch.account;
             try {
-                ScrapeResult result = scrapeReportWithRetry(account, null);
+                ScrapeResult result = scrapeScheduledReportWithTimeout(account);
                 List<String> reportMessages = notificationFormatter.buildReportMessages(
                         result,
                         properties.getAlert().getMaxRowsInMessage(),
@@ -331,6 +346,28 @@ public class ReportCoordinator {
         }
 
         return sentAny;
+    }
+
+    private ScrapeResult scrapeScheduledReportWithTimeout(ChatLinkedWbAccount account) {
+        Future<ScrapeResult> future = scheduledAccountExecutor.submit(() -> scrapeReportWithRetry(account, null));
+        try {
+            return future.get(SCHEDULED_ACCOUNT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new IllegalStateException(
+                    "WB scrape timed out for scheduled run after " + SCHEDULED_ACCOUNT_TIMEOUT_SECONDS + " seconds"
+            );
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Scheduled report run interrupted", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("WB scrape failed during scheduled run", cause);
+        }
     }
 
     private Map<String, String> sendReportMessages(ChatSubscription chat,
