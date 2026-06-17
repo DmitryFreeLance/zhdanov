@@ -43,6 +43,18 @@ public class VoiceCallFollowUpService {
     private static final Set<String> TRANSCRIPT_POSSIBLE_STATUSES = Set.of(
             "completed", "play_audio_stop", "talk", "answered"
     );
+    private static final List<String> ANSWERING_MACHINE_MARKERS = List.of(
+            "голосовой ассистент",
+            "голосовой помощник",
+            "линия абонента сейчас занята",
+            "что важного ему передать",
+            "я запишу все слово в слово",
+            "после сигнала оставьте сообщение",
+            "оставьте сообщение после сигнала",
+            "ваш звонок очень важен",
+            "не могу ответить",
+            "автоответчик"
+    );
 
     private final AppProperties properties;
     private final MaxMessagingService maxMessagingService;
@@ -169,6 +181,18 @@ public class VoiceCallFollowUpService {
                                 hasFallbackText ? fallbackText : "Расшифровка пока недоступна."
                         ));
             } else {
+                if (looksLikeAnsweringMachine(transcription)) {
+                    log.info("Detected answering machine transcription. chatId={}, phone={}, callId={}",
+                            chatId, maskPhone(phoneNumber), callId);
+                    maxMessagingService.sendToChat(chatId,
+                            maxBotUiService.buildVoiceCallFollowUpMessage(
+                                    phoneNumber,
+                                    finalStatus,
+                                    "Детали звонка",
+                                    "На звонок ответил автоответчик или голосовой помощник. Расшифровку не отправляю."
+                            ));
+                    return;
+                }
                 log.info("Exolve transcription received. chatId={}, phone={}, callId={}, length={}",
                         chatId, maskPhone(phoneNumber), callId, transcription.length());
                 maxMessagingService.sendToChat(chatId,
@@ -375,6 +399,19 @@ public class VoiceCallFollowUpService {
         }
         String digits = value.replaceAll("[^0-9]", "");
         return digits.isBlank() ? null : digits;
+    }
+
+    private boolean looksLikeAnsweringMachine(String transcription) {
+        if (transcription == null || transcription.isBlank()) {
+            return false;
+        }
+        String normalized = transcription.toLowerCase();
+        for (String marker : ANSWERING_MACHINE_MARKERS) {
+            if (normalized.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String extractTranscription(JsonNode body) {

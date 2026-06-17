@@ -336,7 +336,7 @@ public class MaxUpdateHandler {
     private void triggerManualVoiceCall(ChatSubscription chat, Long userId) {
         long chatId = chat.chatId();
         if (!isVoiceAllowedFor(userId)) {
-            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Команда /call доступна только для тестового пользователя."));
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Команда /call сейчас недоступна для этого пользователя."));
             return;
         }
         if (!"exolve".equalsIgnoreCase(properties.getTelephony().getProvider())) {
@@ -363,11 +363,11 @@ public class MaxUpdateHandler {
     }
 
     private boolean isVoiceAllowedFor(Long userId) {
-        if (userId == null) {
-            return false;
-        }
         var allowed = properties.getAlert().getVoiceAllowedUserIds();
-        return allowed != null && allowed.contains(userId);
+        if (allowed == null || allowed.isEmpty()) {
+            return true;
+        }
+        return userId != null && allowed.contains(userId);
     }
 
     private void confirmWbAuthCode(ChatSubscription chat, String rawText) {

@@ -41,6 +41,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ReportCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(ReportCoordinator.class);
+    private static final int MANUAL_REPORT_TIMEOUT_SECONDS = 120;
+    private static final int SCHEDULED_REPORT_TIMEOUT_SECONDS = 180;
+    private static final int SCRAPE_ATTEMPTS = 2;
 
     private final AppProperties properties;
     private final WildberriesScraper wildberriesScraper;
@@ -134,7 +137,7 @@ public class ReportCoordinator {
             }
         });
         scheduledRunFuture.set(future);
-        reportWatchdogExecutor.schedule(() -> handleScheduledRunTimeout(future), 180, TimeUnit.SECONDS);
+        reportWatchdogExecutor.schedule(() -> handleScheduledRunTimeout(future), SCHEDULED_REPORT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     public void executeManualRun(Long chatId) {
@@ -150,7 +153,7 @@ public class ReportCoordinator {
             return;
         }
         log.info("Manual report requested for chat {}", chatId);
-        reportWatchdogExecutor.schedule(() -> handleManualRunTimeout(chatId, state), 90, TimeUnit.SECONDS);
+        reportWatchdogExecutor.schedule(() -> handleManualRunTimeout(chatId, state), MANUAL_REPORT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         Future<?> future = manualReportExecutor.submit(() -> {
             try {
                 executeInternal("manual", chatId, state);
@@ -215,7 +218,7 @@ public class ReportCoordinator {
 
                 for (ChatLinkedWbAccount account : accounts) {
                     try {
-                        ScrapeResult result = wildberriesScraper.scrapeReport(account.storageStateJson());
+                        ScrapeResult result = scrapeReportWithRetry(account, manualState);
                         List<String> reportMessages = notificationFormatter.buildReportMessages(
                                 result,
                                 properties.getAlert().getMaxRowsInMessage(),
@@ -291,7 +294,7 @@ public class ReportCoordinator {
         for (ScheduledAccountDispatch dispatch : dispatches.values()) {
             ChatLinkedWbAccount account = dispatch.account;
             try {
-                ScrapeResult result = wildberriesScraper.scrapeReport(account.storageStateJson());
+                ScrapeResult result = scrapeReportWithRetry(account, null);
                 List<String> reportMessages = notificationFormatter.buildReportMessages(
                         result,
                         properties.getAlert().getMaxRowsInMessage(),
@@ -374,7 +377,7 @@ public class ReportCoordinator {
         if (future != null) {
             future.cancel(true);
         }
-        log.warn("Manual report timed out for chat {} after 90 seconds", chatId);
+        log.warn("Manual report timed out for chat {} after {} seconds", chatId, MANUAL_REPORT_TIMEOUT_SECONDS);
         maxMessagingService.sendToChat(chatId, maxBotUiService.buildReportTimedOutMessage());
     }
 
@@ -387,11 +390,58 @@ public class ReportCoordinator {
         }
         future.cancel(true);
         scheduledRunInProgress.set(false);
-        log.warn("Scheduled report run timed out after 180 seconds and was cancelled");
+        log.warn("Scheduled report run timed out after {} seconds and was cancelled", SCHEDULED_REPORT_TIMEOUT_SECONDS);
     }
 
     private boolean isManualTimedOut(ManualRunState state) {
         return state != null && state.timedOut;
+    }
+
+    private ScrapeResult scrapeReportWithRetry(ChatLinkedWbAccount account, ManualRunState manualState) {
+        RuntimeException lastRuntime = null;
+        IllegalStateException lastState = null;
+        for (int attempt = 1; attempt <= SCRAPE_ATTEMPTS; attempt++) {
+            if (isManualTimedOut(manualState) || Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("Report run interrupted");
+            }
+            try {
+                return wildberriesScraper.scrapeReport(account.storageStateJson());
+            } catch (IllegalStateException e) {
+                lastState = e;
+                if (!isRetryableScrapeException(e) || attempt >= SCRAPE_ATTEMPTS) {
+                    throw e;
+                }
+                log.warn("Retrying WB scrape for account {} after transient state error. attempt={}/{} error={}",
+                        account.accountId(), attempt, SCRAPE_ATTEMPTS, e.getMessage());
+            } catch (RuntimeException e) {
+                lastRuntime = e;
+                if (!isRetryableScrapeException(e) || attempt >= SCRAPE_ATTEMPTS) {
+                    throw e;
+                }
+                log.warn("Retrying WB scrape for account {} after transient runtime error. attempt={}/{} error={}",
+                        account.accountId(), attempt, SCRAPE_ATTEMPTS, e.getMessage());
+            }
+        }
+        if (lastState != null) {
+            throw lastState;
+        }
+        throw lastRuntime == null ? new IllegalStateException("WB scrape failed") : lastRuntime;
+    }
+
+    private boolean isRetryableScrapeException(Throwable error) {
+        if (error == null) {
+            return false;
+        }
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        return message.contains("Failed to read message")
+                || message.contains("Execution context was destroyed")
+                || message.contains("Target page, context or browser has been closed")
+                || message.contains("Most likely the page has been closed")
+                || message.startsWith("Timed out waiting for WB report table")
+                || message.startsWith("WB report page did not open in time");
     }
 
     private void processAlerts(ScrapeResult result,
