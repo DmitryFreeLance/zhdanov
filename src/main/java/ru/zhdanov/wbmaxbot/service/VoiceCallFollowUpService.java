@@ -43,6 +43,9 @@ public class VoiceCallFollowUpService {
     private static final Set<String> TRANSCRIPT_POSSIBLE_STATUSES = Set.of(
             "completed", "play_audio_stop", "talk", "answered"
     );
+    private static final Set<String> RETRYABLE_FINAL_STATUSES = Set.of(
+            "no_answer", "busy", "rejected", "canceled"
+    );
     private static final List<String> ANSWERING_MACHINE_MARKERS = List.of(
             "голосовой ассистент",
             "голосовой помощник",
@@ -59,6 +62,7 @@ public class VoiceCallFollowUpService {
     private final AppProperties properties;
     private final MaxMessagingService maxMessagingService;
     private final MaxBotUiService maxBotUiService;
+    private final VoiceAlertService voiceAlertService;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final ExecutorService executorService;
@@ -67,10 +71,12 @@ public class VoiceCallFollowUpService {
     public VoiceCallFollowUpService(AppProperties properties,
                                     MaxMessagingService maxMessagingService,
                                     MaxBotUiService maxBotUiService,
+                                    VoiceAlertService voiceAlertService,
                                     ObjectMapper objectMapper) {
         this.properties = properties;
         this.maxMessagingService = maxMessagingService;
         this.maxBotUiService = maxBotUiService;
+        this.voiceAlertService = voiceAlertService;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -111,10 +117,15 @@ public class VoiceCallFollowUpService {
 
     private void doSendCallResult(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
         boolean hasFallbackText = fallbackText != null && !fallbackText.isBlank();
+        int maxDeliveryAttempts = Math.max(1, properties.getTelephony().getDeliveryAttempts());
+        int deliveryRetryDelaySeconds = Math.max(0, properties.getTelephony().getDeliveryRetryDelaySeconds());
+        int deliveryAttempt = 1;
+        VoiceCallResult currentCallResult = callResult;
         try {
-            if (!callResult.success()) {
+            while (true) {
+            if (!currentCallResult.success()) {
                 log.warn("Voice call did not start successfully. chatId={}, phone={}, provider={}, details={}",
-                        chatId, maskPhone(phoneNumber), callResult.provider(), truncate(callResult.details()));
+                        chatId, maskPhone(phoneNumber), currentCallResult.provider(), truncate(currentCallResult.details()));
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildVoiceCallFollowUpMessage(
                                 phoneNumber,
@@ -125,9 +136,9 @@ public class VoiceCallFollowUpService {
                 return;
             }
 
-            if (!"exolve".equalsIgnoreCase(callResult.provider())) {
+            if (!"exolve".equalsIgnoreCase(currentCallResult.provider())) {
                 log.info("Voice call follow-up skipped for non-Exolve provider. chatId={}, phone={}, provider={}",
-                        chatId, maskPhone(phoneNumber), callResult.provider());
+                        chatId, maskPhone(phoneNumber), currentCallResult.provider());
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildVoiceCallFollowUpMessage(
                                 phoneNumber,
@@ -138,7 +149,7 @@ public class VoiceCallFollowUpService {
                 return;
             }
 
-            String callId = callResult.externalId();
+            String callId = currentCallResult.externalId();
             if (callId == null || callId.isBlank()) {
                 log.warn("Voice call follow-up cannot continue without callId. chatId={}, phone={}",
                         chatId, maskPhone(phoneNumber));
@@ -157,6 +168,23 @@ public class VoiceCallFollowUpService {
             log.info("Exolve final call status received. chatId={}, phone={}, callId={}, status={}",
                     chatId, maskPhone(phoneNumber), callId, finalStatus);
             if (!TRANSCRIPT_POSSIBLE_STATUSES.contains(finalStatus)) {
+                if (RETRYABLE_FINAL_STATUSES.contains(finalStatus) && deliveryAttempt < maxDeliveryAttempts) {
+                    int nextAttempt = deliveryAttempt + 1;
+                    log.info("Retrying voice call after final status {}. chatId={}, phone={}, attempt={}/{}",
+                            finalStatus, chatId, maskPhone(phoneNumber), nextAttempt, maxDeliveryAttempts);
+                    maxMessagingService.sendToChat(chatId,
+                            maxBotUiService.buildMenuMessage(
+                                    "☎️ Не удалось дозвониться до клиента.\n" +
+                                            "Статус: " + finalStatus + "\n\n" +
+                                            "Пробую ещё раз (" + nextAttempt + "/" + maxDeliveryAttempts + ")."
+                            ));
+                    if (deliveryRetryDelaySeconds > 0) {
+                        TimeUnit.SECONDS.sleep(deliveryRetryDelaySeconds);
+                    }
+                    currentCallResult = voiceAlertService.callTarget(phoneNumber, fallbackText);
+                    deliveryAttempt = nextAttempt;
+                    continue;
+                }
                 log.warn("Exolve transcription skipped because final status is not eligible. chatId={}, phone={}, callId={}, status={}",
                         chatId, maskPhone(phoneNumber), callId, finalStatus);
                 maxMessagingService.sendToChat(chatId,
@@ -182,6 +210,22 @@ public class VoiceCallFollowUpService {
                         ));
             } else {
                 if (looksLikeAnsweringMachine(transcription)) {
+                    if (deliveryAttempt < maxDeliveryAttempts) {
+                        int nextAttempt = deliveryAttempt + 1;
+                        log.info("Retrying voice call after answering machine detection. chatId={}, phone={}, callId={}, attempt={}/{}",
+                                chatId, maskPhone(phoneNumber), callId, nextAttempt, maxDeliveryAttempts);
+                        maxMessagingService.sendToChat(chatId,
+                                maxBotUiService.buildMenuMessage(
+                                        "☎️ На звонок ответил автоответчик или голосовой помощник.\n\n" +
+                                                "Пробую ещё раз (" + nextAttempt + "/" + maxDeliveryAttempts + ")."
+                                ));
+                        if (deliveryRetryDelaySeconds > 0) {
+                            TimeUnit.SECONDS.sleep(deliveryRetryDelaySeconds);
+                        }
+                        currentCallResult = voiceAlertService.callTarget(phoneNumber, fallbackText);
+                        deliveryAttempt = nextAttempt;
+                        continue;
+                    }
                     log.info("Detected answering machine transcription. chatId={}, phone={}, callId={}",
                             chatId, maskPhone(phoneNumber), callId);
                     maxMessagingService.sendToChat(chatId,
@@ -198,9 +242,11 @@ public class VoiceCallFollowUpService {
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, finalStatus, transcription));
             }
+            return;
+            }
         } catch (Exception e) {
             log.warn("Failed to fetch Exolve call follow-up. chatId={}, phone={}, callId={}, error={}",
-                    chatId, maskPhone(phoneNumber), callResult.externalId(), e.getMessage(), e);
+                    chatId, maskPhone(phoneNumber), currentCallResult.externalId(), e.getMessage(), e);
             maxMessagingService.sendToChat(chatId,
                     maxBotUiService.buildVoiceCallFollowUpMessage(
                             phoneNumber,

@@ -402,6 +402,8 @@ public class AppProperties {
         private List<String> targetNumbers = new ArrayList<>();
         private int maxAttempts = 3;
         private int retryDelaySeconds = 15;
+        private int deliveryAttempts = 3;
+        private int deliveryRetryDelaySeconds = 5;
         private int followUpThreads = 6;
         @NotNull
         private Exolve exolve = new Exolve();
@@ -442,6 +444,22 @@ public class AppProperties {
 
         public void setRetryDelaySeconds(int retryDelaySeconds) {
             this.retryDelaySeconds = retryDelaySeconds;
+        }
+
+        public int getDeliveryAttempts() {
+            return deliveryAttempts;
+        }
+
+        public void setDeliveryAttempts(int deliveryAttempts) {
+            this.deliveryAttempts = deliveryAttempts;
+        }
+
+        public int getDeliveryRetryDelaySeconds() {
+            return deliveryRetryDelaySeconds;
+        }
+
+        public void setDeliveryRetryDelaySeconds(int deliveryRetryDelaySeconds) {
+            this.deliveryRetryDelaySeconds = deliveryRetryDelaySeconds;
         }
 
         public int getFollowUpThreads() {
