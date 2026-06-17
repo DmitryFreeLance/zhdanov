@@ -29,6 +29,7 @@ public class MaxUpdateHandler {
     private final MaxBotUiService maxBotUiService;
     private final VoiceAlertService voiceAlertService;
     private final VoiceCallFollowUpService voiceCallFollowUpService;
+    private final PhoneBlacklistService phoneBlacklistService;
     private final ru.zhdanov.wbmaxbot.config.AppProperties properties;
 
     public MaxUpdateHandler(MaxMessagingService maxMessagingService,
@@ -42,6 +43,7 @@ public class MaxUpdateHandler {
                             MaxBotUiService maxBotUiService,
                             VoiceAlertService voiceAlertService,
                             VoiceCallFollowUpService voiceCallFollowUpService,
+                            PhoneBlacklistService phoneBlacklistService,
                             ru.zhdanov.wbmaxbot.config.AppProperties properties) {
         this.maxMessagingService = maxMessagingService;
         this.reportCoordinator = reportCoordinator;
@@ -54,6 +56,7 @@ public class MaxUpdateHandler {
         this.maxBotUiService = maxBotUiService;
         this.voiceAlertService = voiceAlertService;
         this.voiceCallFollowUpService = voiceCallFollowUpService;
+        this.phoneBlacklistService = phoneBlacklistService;
         this.properties = properties;
     }
 
@@ -235,6 +238,7 @@ public class MaxUpdateHandler {
             switch (chat.pendingInputState()) {
                 case ChatSettingsService.PENDING_PHONE -> {
                     String phone = normalizePhoneNumber(rawText);
+                    ensurePhoneNotBlacklisted(phone);
                     chatSettingsService.setPhoneNumber(chatId, phone);
                     chatSettingsService.clearPendingInputState(chatId);
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildPhoneSavedMessage(phone));
@@ -288,6 +292,11 @@ public class MaxUpdateHandler {
     private void toggleCall(long chatId, String callbackId, ChatSubscription chat) {
         if (!chat.callEnabled() && (chat.phoneNumber() == null || chat.phoneNumber().isBlank())) {
             maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildCallToggleBlockedMessage(),
+                    maxBotUiService.buildPhoneMenu(chat));
+            return;
+        }
+        if (!chat.callEnabled() && phoneBlacklistService.isBlacklisted(chat.phoneNumber())) {
+            maxMessagingService.answerCallback(chatId, callbackId, phoneBlacklistService.buildBlockedMessage(),
                     maxBotUiService.buildPhoneMenu(chat));
             return;
         }
@@ -345,6 +354,10 @@ public class MaxUpdateHandler {
         }
         if (chat.phoneNumber() == null || chat.phoneNumber().isBlank()) {
             maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Сначала укажи номер в разделе Телефон."));
+            return;
+        }
+        if (phoneBlacklistService.isBlacklisted(chat.phoneNumber())) {
+            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage(phoneBlacklistService.buildBlockedMessage()));
             return;
         }
         if (properties.getTelephony().getExolve().getServiceId() == null
@@ -498,6 +511,12 @@ public class MaxUpdateHandler {
             return "+7" + onlyDigits.substring(1);
         }
         throw new IllegalArgumentException("Некорректный номер. Отправьте номер в формате +79991234567.");
+    }
+
+    private void ensurePhoneNotBlacklisted(String phoneNumber) {
+        if (phoneBlacklistService.isBlacklisted(phoneNumber)) {
+            throw new IllegalArgumentException(phoneBlacklistService.buildBlockedMessage());
+        }
     }
 
     private void attachWbAccountFromFile(long chatId, String phoneNumber) {

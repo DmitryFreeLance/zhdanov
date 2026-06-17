@@ -52,6 +52,7 @@ public class ReportCoordinator {
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
     private final VoiceCallFollowUpService voiceCallFollowUpService;
+    private final PhoneBlacklistService phoneBlacklistService;
     private final ChatSettingsService chatSettingsService;
     private final WbAccountService wbAccountService;
     private final ReportRepository reportRepository;
@@ -72,6 +73,7 @@ public class ReportCoordinator {
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
                              VoiceCallFollowUpService voiceCallFollowUpService,
+                             PhoneBlacklistService phoneBlacklistService,
                              ChatSettingsService chatSettingsService,
                              WbAccountService wbAccountService,
                              ReportRepository reportRepository,
@@ -84,6 +86,7 @@ public class ReportCoordinator {
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
         this.voiceCallFollowUpService = voiceCallFollowUpService;
+        this.phoneBlacklistService = phoneBlacklistService;
         this.chatSettingsService = chatSettingsService;
         this.wbAccountService = wbAccountService;
         this.reportRepository = reportRepository;
@@ -464,6 +467,12 @@ public class ReportCoordinator {
         boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled()
                 && chat.callEnabled()
                 && isVoiceAllowedFor(chat);
+        boolean blacklistedPhone = voiceCallEnabled && phoneBlacklistService.isBlacklisted(chat.phoneNumber());
+        if (blacklistedPhone) {
+            maxMessagingService.sendToChat(chat.chatId(),
+                    maxBotUiService.buildErrorMessage(phoneBlacklistService.buildBlockedAutoCallMessage()));
+            voiceCallEnabled = false;
+        }
         String voiceText = shouldUseSilentExolveMessage()
                 ? ""
                 : notificationFormatter.buildVoiceText(activeTriggers);

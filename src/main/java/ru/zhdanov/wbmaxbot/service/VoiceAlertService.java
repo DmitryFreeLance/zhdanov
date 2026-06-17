@@ -17,10 +17,15 @@ public class VoiceAlertService {
     private final AppProperties properties;
     private final Map<String, TelephonyProvider> providers = new HashMap<>();
     private final NoopTelephonyProvider noopTelephonyProvider;
+    private final PhoneBlacklistService phoneBlacklistService;
 
-    public VoiceAlertService(AppProperties properties, List<TelephonyProvider> providers, NoopTelephonyProvider noopTelephonyProvider) {
+    public VoiceAlertService(AppProperties properties,
+                             List<TelephonyProvider> providers,
+                             NoopTelephonyProvider noopTelephonyProvider,
+                             PhoneBlacklistService phoneBlacklistService) {
         this.properties = properties;
         this.noopTelephonyProvider = noopTelephonyProvider;
+        this.phoneBlacklistService = phoneBlacklistService;
         for (TelephonyProvider provider : providers) {
             this.providers.put(provider.providerName(), provider);
         }
@@ -34,6 +39,10 @@ public class VoiceAlertService {
 
         VoiceCallResult lastResult = VoiceCallResult.failure(provider.providerName(), "No target numbers configured");
         for (String targetNumber : properties.getTelephony().getTargetNumbers()) {
+            if (phoneBlacklistService.isBlacklisted(targetNumber)) {
+                lastResult = VoiceCallResult.failure(provider.providerName(), phoneBlacklistService.buildBlockedMessage());
+                continue;
+            }
             lastResult = provider.call(targetNumber, spokenText);
         }
         return lastResult;
@@ -46,6 +55,9 @@ public class VoiceAlertService {
         }
         if (targetNumber == null || targetNumber.isBlank()) {
             return VoiceCallResult.failure(provider.providerName(), "No target number configured");
+        }
+        if (phoneBlacklistService.isBlacklisted(targetNumber)) {
+            return VoiceCallResult.failure(provider.providerName(), phoneBlacklistService.buildBlockedMessage());
         }
 
         int maxAttempts = Math.max(1, properties.getTelephony().getMaxAttempts());
