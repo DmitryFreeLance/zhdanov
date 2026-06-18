@@ -3,6 +3,7 @@ package ru.zhdanov.wbmaxbot.service;
 import org.springframework.stereotype.Component;
 import ru.zhdanov.wbmaxbot.model.AlertTrigger;
 import ru.zhdanov.wbmaxbot.model.ReportRow;
+import ru.zhdanov.wbmaxbot.model.ReportSummary;
 import ru.zhdanov.wbmaxbot.model.ScrapeResult;
 
 import java.time.format.DateTimeFormatter;
@@ -22,15 +23,12 @@ public class NotificationFormatter {
 
     public List<String> buildReportMessages(ScrapeResult result, int maxRowsInMessage, String accountLabel) {
         List<String> messages = new ArrayList<>();
-        String header = """
-                Отчёт WB Last Mile
-                %s
-                Время: %s
-                                
-                """.formatted(
-                formatAccountLine(accountLabel),
-                DATE_TIME_FORMATTER.format(result.scrapedAt())
-        );
+        String header = buildReportHeader(result, accountLabel);
+
+        if (result.rows().isEmpty()) {
+            messages.add(buildEmptyReportMessage(result.summary(), header));
+            return messages;
+        }
 
         StringBuilder current = new StringBuilder(header);
         int rowsAdded = 0;
@@ -220,6 +218,33 @@ public class NotificationFormatter {
 
     private String formatPercent(double ratio) {
         return String.format(Locale.US, "%.1f%%", ratio * 100.0d);
+    }
+
+    private String buildReportHeader(ScrapeResult result, String accountLabel) {
+        StringBuilder header = new StringBuilder("Отчёт WB Last Mile\n");
+        if (accountLabel != null && !accountLabel.isBlank()) {
+            header.append("Аккаунт: ").append(accountLabel).append("\n");
+        }
+        header.append("Время: ")
+                .append(DATE_TIME_FORMATTER.format(result.scrapedAt()))
+                .append("\n\n");
+        return header.toString();
+    }
+
+    private String buildEmptyReportMessage(ReportSummary summary, String header) {
+        return (header
+                + "WB вернул пустой отчёт: строк не найдено.\n"
+                + "Строк: " + summary.rowsCount() + "\n"
+                + "ШК всего: " + summary.totalShk() + "\n"
+                + "Коробки всего: " + summary.totalBoxes() + "\n"
+                + "КГТ всего: " + summary.totalKgt() + "\n"
+                + "Объём, л: " + formatDecimal(summary.totalVolumeLiters())
+                + (summary.heading() == null || summary.heading().isBlank() ? "" : "\nЗаголовок WB: " + summary.heading()))
+                .trim();
+    }
+
+    private String formatDecimal(double value) {
+        return String.format(Locale.US, "%.1f", value);
     }
 
     private String formatAccountLine(String accountLabel) {

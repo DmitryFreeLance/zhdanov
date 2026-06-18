@@ -84,15 +84,23 @@ public class WildberriesScraper {
                 } catch (RuntimeException e) {
                     throw new IllegalStateException(buildNavigationTimeoutMessage(page), e);
                 }
-                waitForReport(page, properties.getWildberries().getTimeout().toMillis());
+                long deadline = System.currentTimeMillis() + properties.getWildberries().getTimeout().toMillis();
+                waitForReportShell(page, deadline);
 
                 if (page.url().contains("/auth/login")) {
                     throw new IllegalStateException("WB session expired: page redirected to login");
                 }
 
-                String json = (String) page.evaluate(EXTRACT_REPORT_SCRIPT);
+                String json = waitForReportDataAndExtract(page, deadline);
                 context.storageState(new BrowserContext.StorageStateOptions().setPath(storageStatePath));
-                return parseScrapeResult(json);
+                ScrapeResult result = parseScrapeResult(json);
+                log.info("WB scrape result ready. heading='{}', rows={}, totalShk={}, totalBoxes={}, url={}",
+                        blankFallback(result.summary().heading()),
+                        result.summary().rowsCount(),
+                        result.summary().totalShk(),
+                        result.summary().totalBoxes(),
+                        blankFallback(page.url()));
+                return result;
             }
         }
     }
@@ -142,8 +150,7 @@ public class WildberriesScraper {
         return options;
     }
 
-    private void waitForReport(Page page, double timeoutMs) {
-        long deadline = System.currentTimeMillis() + (long) timeoutMs;
+    private void waitForReportShell(Page page, long deadline) {
         while (System.currentTimeMillis() < deadline) {
             if (page.url().contains("/auth/login")) {
                 return;
@@ -154,6 +161,31 @@ public class WildberriesScraper {
             page.waitForTimeout(1000);
         }
         throw new IllegalStateException(buildReportTimeoutMessage(page));
+    }
+
+    private String waitForReportDataAndExtract(Page page, long deadline) {
+        ReportProbe lastProbe = null;
+        while (System.currentTimeMillis() < deadline) {
+            if (page.url().contains("/auth/login")) {
+                return (String) page.evaluate(EXTRACT_REPORT_SCRIPT);
+            }
+            ReportProbe probe = readReportProbe(page);
+            lastProbe = probe;
+            if (probe.hasDataRows()) {
+                return (String) page.evaluate(EXTRACT_REPORT_SCRIPT);
+            }
+            page.waitForTimeout(1000);
+        }
+
+        if (lastProbe != null) {
+            log.warn("WB report page stayed without data rows until timeout. title='{}', heading='{}', tableFound={}, dataRows={}, body='{}'",
+                    blankFallback(safeEvaluate(page, "() => document.title")),
+                    blankFallback(lastProbe.heading()),
+                    lastProbe.tableFound(),
+                    lastProbe.dataRowCount(),
+                    blankFallback(lastProbe.bodyText()));
+        }
+        return (String) page.evaluate(EXTRACT_REPORT_SCRIPT);
     }
 
     private int count(Page page, String selector) {
@@ -221,6 +253,16 @@ public class WildberriesScraper {
 
     private String blankFallback(String value) {
         return value == null || value.isBlank() ? "-" : value;
+    }
+
+    private ReportProbe readReportProbe(Page page) {
+        try {
+            String json = String.valueOf(page.evaluate(EXTRACT_REPORT_PROBE_SCRIPT));
+            return objectMapper.readValue(json, ReportProbe.class);
+        } catch (Exception e) {
+            log.debug("Unable to read WB report probe: {}", e.getMessage());
+            return new ReportProbe(false, "", 0, "");
+        }
     }
 
     private ScrapeResult parseScrapeResult(String json) {
@@ -311,6 +353,35 @@ public class WildberriesScraper {
         return value == null ? null : asDouble(value);
     }
 
+    private record ReportProbe(
+            boolean tableFound,
+            String heading,
+            int dataRowCount,
+            String bodyText
+    ) {
+        boolean hasDataRows() {
+            return dataRowCount > 0;
+        }
+    }
+
+    private static final String EXTRACT_REPORT_PROBE_SCRIPT = """
+            () => JSON.stringify((() => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const table = document.querySelector('table');
+              const rows = table ? Array.from(table.querySelectorAll('tbody tr')) : [];
+              const dataRowCount = rows.filter((tr) => {
+                const cells = tr.querySelectorAll('td');
+                return cells.length >= 10 && normalize(tr.textContent).length > 0;
+              }).length;
+              return {
+                tableFound: Boolean(table),
+                heading: normalize(document.querySelector('h1, h2')?.textContent) || document.title || '',
+                dataRowCount,
+                bodyText: normalize(document.body?.innerText || '').slice(0, 400)
+              };
+            })())
+            """;
+
     private static final String EXTRACT_REPORT_SCRIPT = """
             () => JSON.stringify((() => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
@@ -337,24 +408,29 @@ public class WildberriesScraper {
                 };
               }
 
-              const rows = Array.from(table.querySelectorAll('tbody tr')).map((tr) => {
-                const cells = Array.from(tr.querySelectorAll('td')).map((td) => normalize(td.textContent));
-                return {
-                  loName: cells[1] || '',
-                  autoRequests: cells[2] || '',
-                  pickupTime: cells[3] || '',
-                  route: cells[4] || '',
-                  parking: cells[5] || '',
-                  boxes: parseNumber(cells[6]),
-                  kgt: parseNumber(cells[7]),
-                  shk: parseNumber(cells[8]),
-                  norm: parseNumber(cells[9]),
-                  ratio: parseNumber(cells[9]) ? Number((parseNumber(cells[8]) / parseNumber(cells[9])).toFixed(4)) : 0,
-                  volumeLiters: parseNumber(cells[10]),
-                  averageAccumulationLiters: parseNumber(cells[11]),
-                  distanceKm: parseNumber(cells[12])
-                };
-              });
+              const rows = Array.from(table.querySelectorAll('tbody tr'))
+                .filter((tr) => {
+                  const cells = tr.querySelectorAll('td');
+                  return cells.length >= 10 && normalize(tr.textContent).length > 0;
+                })
+                .map((tr) => {
+                  const cells = Array.from(tr.querySelectorAll('td')).map((td) => normalize(td.textContent));
+                  return {
+                    loName: cells[1] || '',
+                    autoRequests: cells[2] || '',
+                    pickupTime: cells[3] || '',
+                    route: cells[4] || '',
+                    parking: cells[5] || '',
+                    boxes: parseNumber(cells[6]),
+                    kgt: parseNumber(cells[7]),
+                    shk: parseNumber(cells[8]),
+                    norm: parseNumber(cells[9]),
+                    ratio: parseNumber(cells[9]) ? Number((parseNumber(cells[8]) / parseNumber(cells[9])).toFixed(4)) : 0,
+                    volumeLiters: parseNumber(cells[10]),
+                    averageAccumulationLiters: parseNumber(cells[11]),
+                    distanceKm: parseNumber(cells[12])
+                  };
+                });
 
               const totals = rows.reduce((acc, row) => {
                 acc.totalShk += row.shk;
