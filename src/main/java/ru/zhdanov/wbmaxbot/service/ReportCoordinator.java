@@ -591,7 +591,14 @@ public class ReportCoordinator {
     }
 
     private String normalizeParking(String parking) {
-        return parking == null ? "" : parking.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        if (parking == null) {
+            return "";
+        }
+        String normalized = parking.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        normalized = normalized.replaceFirst("^парковка\\s*", "");
+        normalized = normalized.replaceFirst("^№\\s*", "");
+        normalized = normalized.replaceFirst("^#\\s*", "");
+        return normalized.trim();
     }
 
     private boolean isSuppressedByCooldown(String dedupeKey) {
