@@ -104,10 +104,22 @@ public class VoiceCallFollowUpService {
         return activeChatIds.contains(chatId);
     }
 
+    public void clearCallFlow(long chatId) {
+        activeChatIds.remove(chatId);
+    }
+
     public void sendCallResultAsync(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
+        sendCallResultAsync(chatId, phoneNumber, callResult, fallbackText, true);
+    }
+
+    public void sendCallResultAsync(long chatId,
+                                    String phoneNumber,
+                                    VoiceCallResult callResult,
+                                    String fallbackText,
+                                    boolean allowDeliveryRetries) {
         log.info("Scheduling voice call follow-up. chatId={}, phone={}, provider={}, success={}, callId={}",
                 chatId, maskPhone(phoneNumber), callResult.provider(), callResult.success(), callResult.externalId());
-        executorService.submit(() -> doSendCallResult(chatId, phoneNumber, callResult, fallbackText));
+        executorService.submit(() -> doSendCallResult(chatId, phoneNumber, callResult, fallbackText, allowDeliveryRetries));
     }
 
     @PreDestroy
@@ -115,7 +127,11 @@ public class VoiceCallFollowUpService {
         executorService.shutdownNow();
     }
 
-    private void doSendCallResult(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
+    private void doSendCallResult(long chatId,
+                                  String phoneNumber,
+                                  VoiceCallResult callResult,
+                                  String fallbackText,
+                                  boolean allowDeliveryRetries) {
         boolean hasFallbackText = fallbackText != null && !fallbackText.isBlank();
         int maxDeliveryAttempts = Math.max(1, properties.getTelephony().getDeliveryAttempts());
         int deliveryRetryDelaySeconds = Math.max(0, properties.getTelephony().getDeliveryRetryDelaySeconds());
@@ -168,7 +184,9 @@ public class VoiceCallFollowUpService {
             log.info("Exolve final call status received. chatId={}, phone={}, callId={}, status={}",
                     chatId, maskPhone(phoneNumber), callId, finalStatus);
             if (!TRANSCRIPT_POSSIBLE_STATUSES.contains(finalStatus)) {
-                if (RETRYABLE_FINAL_STATUSES.contains(finalStatus) && deliveryAttempt < maxDeliveryAttempts) {
+                if (allowDeliveryRetries
+                        && RETRYABLE_FINAL_STATUSES.contains(finalStatus)
+                        && deliveryAttempt < maxDeliveryAttempts) {
                     int nextAttempt = deliveryAttempt + 1;
                     log.info("Retrying voice call after final status {}. chatId={}, phone={}, attempt={}/{}",
                             finalStatus, chatId, maskPhone(phoneNumber), nextAttempt, maxDeliveryAttempts);
@@ -210,7 +228,7 @@ public class VoiceCallFollowUpService {
                         ));
             } else {
                 if (looksLikeAnsweringMachine(transcription)) {
-                    if (deliveryAttempt < maxDeliveryAttempts) {
+                    if (allowDeliveryRetries && deliveryAttempt < maxDeliveryAttempts) {
                         int nextAttempt = deliveryAttempt + 1;
                         log.info("Retrying voice call after answering machine detection. chatId={}, phone={}, callId={}, attempt={}/{}",
                                 chatId, maskPhone(phoneNumber), callId, nextAttempt, maxDeliveryAttempts);

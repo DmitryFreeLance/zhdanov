@@ -235,7 +235,7 @@ public class AppProperties {
     public static class Max {
         private boolean enabled;
         @NotBlank
-        private String baseUrl = "https://platform-api.max.ru";
+        private String baseUrl = "https://platform-api2.max.ru";
         private boolean longPollingEnabled = true;
         private Duration longPollingTimeout = Duration.ofSeconds(30);
         private int longPollingLimit = 100;

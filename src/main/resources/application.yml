@@ -43,7 +43,7 @@ app:
     storage-state-path: ./data/wb-storage-state.json
   max:
     enabled: false
-    base-url: https://platform-api.max.ru
+    base-url: https://platform-api2.max.ru
     long-polling-enabled: true
     long-polling-timeout: PT30S
     long-polling-limit: 100

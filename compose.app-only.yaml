@@ -7,5 +7,6 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+      - ./certs:/app/certs:ro
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-18080}:8080"

@@ -71,7 +71,7 @@ public class NotificationFormatter {
                 """.formatted(
                 formatAccountLine(accountLabel),
                 trigger.reason(),
-                voiceCallEnabled ? "автоматический звонок запущен" : "нужно позвонить вручную",
+                voiceCallEnabled ? "нажмите кнопку ниже, чтобы начать звонок" : "нужно позвонить вручную",
                 resolveParkingEmoji(row.ratio()),
                 row.parking(),
                 row.boxes(),
@@ -143,7 +143,7 @@ public class NotificationFormatter {
                 """.formatted(
                 formatAccountLine(accountLabel),
                 triggers.size(),
-                voiceCallEnabled ? "автоматический звонок запущен" : "нужно позвонить вручную"
+                voiceCallEnabled ? "нажмите кнопку ниже, чтобы начать звонок" : "нужно позвонить вручную"
         ));
 
         for (int i = 0; i < triggers.size(); i++) {
@@ -189,7 +189,7 @@ public class NotificationFormatter {
                 Режим: %s
                 Сессии WB: %s
                 Активных чатов: %d
-                Автозвонок: %s
+                Звонок по кнопке: %s
                 """.formatted(
                 mode,
                 sessionExists ? "готов" : "не найден",
