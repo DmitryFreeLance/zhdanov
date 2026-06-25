@@ -85,20 +85,6 @@ public class VoiceAlertService {
         return VoiceCallResult.failure(lastResult.provider(), appendAttemptSummary(lastResult.details(), attemptDetails));
     }
 
-    public VoiceCallResult callTargetOnce(String targetNumber, String spokenText) {
-        TelephonyProvider provider = providers.getOrDefault(properties.getTelephony().getProvider(), noopTelephonyProvider);
-        if (!provider.isConfigured()) {
-            return VoiceCallResult.failure(provider.providerName(), "Provider is not configured");
-        }
-        if (targetNumber == null || targetNumber.isBlank()) {
-            return VoiceCallResult.failure(provider.providerName(), "No target number configured");
-        }
-        if (phoneBlacklistService.isBlacklisted(targetNumber)) {
-            return VoiceCallResult.failure(provider.providerName(), phoneBlacklistService.buildBlockedMessage());
-        }
-        return provider.call(targetNumber, spokenText);
-    }
-
     public boolean isConfigured() {
         TelephonyProvider provider = providers.getOrDefault(properties.getTelephony().getProvider(), noopTelephonyProvider);
         return provider.isConfigured();

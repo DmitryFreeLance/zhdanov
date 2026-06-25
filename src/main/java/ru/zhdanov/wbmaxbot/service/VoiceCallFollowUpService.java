@@ -104,10 +104,6 @@ public class VoiceCallFollowUpService {
         return activeChatIds.contains(chatId);
     }
 
-    public void clearCallFlow(long chatId) {
-        activeChatIds.remove(chatId);
-    }
-
     public void sendCallResultAsync(long chatId, String phoneNumber, VoiceCallResult callResult, String fallbackText) {
         sendCallResultAsync(chatId, phoneNumber, callResult, fallbackText, true);
     }

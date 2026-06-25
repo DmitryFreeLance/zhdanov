@@ -12,6 +12,7 @@ import ru.zhdanov.wbmaxbot.model.ChatSubscription;
 import ru.zhdanov.wbmaxbot.model.ChatLinkedWbAccount;
 import ru.zhdanov.wbmaxbot.model.ReportRow;
 import ru.zhdanov.wbmaxbot.model.ScrapeResult;
+import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
 import ru.zhdanov.wbmaxbot.repository.AlertEventRepository;
 import ru.zhdanov.wbmaxbot.repository.ReportRepository;
 
@@ -53,7 +54,7 @@ public class ReportCoordinator {
     private final MaxBotUiService maxBotUiService;
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
-    private final AlertCallRequestService alertCallRequestService;
+    private final VoiceCallFollowUpService voiceCallFollowUpService;
     private final PhoneBlacklistService phoneBlacklistService;
     private final ChatSettingsService chatSettingsService;
     private final WbAccountService wbAccountService;
@@ -75,7 +76,7 @@ public class ReportCoordinator {
                              MaxBotUiService maxBotUiService,
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
-                             AlertCallRequestService alertCallRequestService,
+                             VoiceCallFollowUpService voiceCallFollowUpService,
                              PhoneBlacklistService phoneBlacklistService,
                              ChatSettingsService chatSettingsService,
                              WbAccountService wbAccountService,
@@ -88,7 +89,7 @@ public class ReportCoordinator {
         this.maxBotUiService = maxBotUiService;
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
-        this.alertCallRequestService = alertCallRequestService;
+        this.voiceCallFollowUpService = voiceCallFollowUpService;
         this.phoneBlacklistService = phoneBlacklistService;
         this.chatSettingsService = chatSettingsService;
         this.wbAccountService = wbAccountService;
@@ -502,31 +503,35 @@ public class ReportCoordinator {
 
         boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled()
                 && chat.callEnabled()
-                && isVoiceAllowedFor(chat)
-                && voiceAlertService.isConfigured();
+                && isVoiceAllowedFor(chat);
         boolean blacklistedPhone = voiceCallEnabled && phoneBlacklistService.isBlacklisted(chat.phoneNumber());
         if (blacklistedPhone) {
             maxMessagingService.sendToChat(chat.chatId(),
                     maxBotUiService.buildErrorMessage(phoneBlacklistService.buildBlockedAutoCallMessage()));
             voiceCallEnabled = false;
         }
+        String voiceText = shouldUseSilentExolveMessage()
+                ? ""
+                : notificationFormatter.buildVoiceText(activeTriggers);
+        boolean callFlowReserved = false;
+        VoiceCallResult callResult;
+        if (!voiceCallEnabled) {
+            callResult = VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
+        } else if (!voiceCallFollowUpService.tryBeginCallFlow(chat.chatId())) {
+            log.info("Skipping voice call because previous follow-up is still active. chatId={}, phone={}",
+                    chat.chatId(), chat.phoneNumber());
+            callResult = VoiceCallResult.failure(properties.getTelephony().getProvider(),
+                    "Previous voice call follow-up is still in progress");
+        } else {
+            callFlowReserved = true;
+            callResult = voiceAlertService.callTarget(chat.phoneNumber(), voiceText);
+        }
 
         for (AlertTrigger trigger : activeTriggers) {
-            String voiceText = shouldUseSilentExolveMessage()
-                    ? ""
-                    : notificationFormatter.buildVoiceText(trigger);
-            String requestId = voiceCallEnabled
-                    ? alertCallRequestService.create(chat.chatId(), chat.phoneNumber(), voiceText)
-                    : null;
             String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled, maskPhone(account.phoneNumber()));
             String messageStatus = maxMessagingService.sendToChat(
                     chat.chatId(),
-                    maxBotUiService.buildAlertMessage(
-                            alertMessage,
-                            chat.phoneNumber(),
-                            voiceCallEnabled,
-                            requestId == null ? null : "alert:call:" + requestId
-                    )
+                    maxBotUiService.buildAlertMessage(alertMessage, chat.phoneNumber(), voiceCallEnabled)
             );
 
             String dedupeKey = chat.chatId() + ":" + account.accountId() + ":" + trigger.dedupeKey();
@@ -540,13 +545,15 @@ public class ReportCoordinator {
                     trigger.row().ratio(),
                     trigger.reason(),
                     mergeStatuses(baseMessageStatuses.getOrDefault(statusKey(chat.chatId(), account.accountId()), "not-sent"), messageStatus),
-                    voiceCallEnabled ? properties.getTelephony().getProvider() : "manual-button-disabled",
-                    voiceCallEnabled ? "button-available" : "skipped",
-                    null,
-                    voiceCallEnabled
-                            ? "Alert call button created"
-                            : "Voice calls disabled; sent alert without start-call button"
+                    callResult.provider(),
+                    voiceCallEnabled ? (callResult.success() ? "success" : "failed") : "skipped",
+                    callResult.externalId(),
+                    callResult.details()
             );
+        }
+
+        if (voiceCallEnabled && callFlowReserved) {
+            voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), chat.phoneNumber(), callResult, voiceText);
         }
     }
 

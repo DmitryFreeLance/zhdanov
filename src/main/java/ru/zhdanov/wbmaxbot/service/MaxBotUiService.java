@@ -135,7 +135,7 @@ public class MaxBotUiService {
                 Текущий номер для этого чата: %s
                 Режим дозвона: %s
 
-                При тревоге кнопка звонка будет использовать именно этот номер.
+                При тревоге бот будет звонить именно на этот номер.
                 Можно ввести новый номер или очистить текущий.
                 """.formatted(
                 formatPhone(chat),
@@ -187,7 +187,7 @@ public class MaxBotUiService {
                 📞 Введите номер телефона для дозвона.
 
                 Этот номер сохранится для текущего пользователя/чата.
-                При тревоге кнопка звонка будет использовать именно этот номер.
+                При тревоге бот будет звонить именно сюда.
 
                 Примеры:
                 +79991234567
@@ -385,30 +385,21 @@ public class MaxBotUiService {
         return buildErrorMessage("Не удалось сформировать отчёт. Попробуйте ещё раз.");
     }
 
-    public MaxOutgoingMessage buildAlertMessage(String text,
-                                                String phoneNumber,
-                                                boolean voiceCallEnabled,
-                                                String startCallPayload) {
+    public MaxOutgoingMessage buildAlertMessage(String text, String phoneNumber, boolean voiceCallEnabled) {
         String finalText = text;
         if (hasPhone(phoneNumber)) {
             String suffix = voiceCallEnabled
-                    ? "\n\n📞 Номер для звонка: " + phoneNumber
+                    ? "\n\n📞 Если нужно перезвонить вручную: " + phoneNumber
                     : "\n\n📞 Номер для ручного звонка: " + phoneNumber;
             finalText += suffix;
-        }
-        if (voiceCallEnabled && startCallPayload != null && !startCallPayload.isBlank()) {
-            return withKeyboard(finalText,
-                    row(callback("☎️ Начать звонок", startCallPayload)),
-                    row(callback("🔙 В меню", "menu:main"))
-            );
         }
         return buildMenuMessage(finalText);
     }
 
     public MaxOutgoingMessage buildVoiceCallScriptMessage(String phoneNumber, boolean success, String spokenText) {
         String header = success
-                ? "☎️ Звонок запущен."
-                : "☎️ Звонок не удался.";
+                ? "☎️ Автозвонок запущен."
+                : "☎️ Автозвонок не удался.";
         String withPhone = hasPhone(phoneNumber)
                 ? header + "\nНомер: " + phoneNumber
                 : header;
@@ -424,8 +415,8 @@ public class MaxBotUiService {
                                                             String sectionTitle,
                                                             String text) {
         String withPhone = hasPhone(phoneNumber)
-                ? "☎️ Результат звонка\nНомер: " + phoneNumber
-                : "☎️ Результат звонка";
+                ? "☎️ Результат автозвонка\nНомер: " + phoneNumber
+                : "☎️ Результат автозвонка";
         String statusLine = status == null || status.isBlank() ? "" : "\nСтатус: " + status;
         return buildMenuMessage(withPhone + statusLine + "\n\n" + sectionTitle + ":\n" + text);
     }

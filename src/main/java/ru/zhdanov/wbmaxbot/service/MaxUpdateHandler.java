@@ -27,7 +27,6 @@ public class MaxUpdateHandler {
     private final WbStorageStateImportService wbStorageStateImportService;
     private final WildberriesScraper wildberriesScraper;
     private final MaxBotUiService maxBotUiService;
-    private final AlertCallRequestService alertCallRequestService;
     private final VoiceAlertService voiceAlertService;
     private final VoiceCallFollowUpService voiceCallFollowUpService;
     private final PhoneBlacklistService phoneBlacklistService;
@@ -42,7 +41,6 @@ public class MaxUpdateHandler {
                             WbStorageStateImportService wbStorageStateImportService,
                             WildberriesScraper wildberriesScraper,
                             MaxBotUiService maxBotUiService,
-                            AlertCallRequestService alertCallRequestService,
                             VoiceAlertService voiceAlertService,
                             VoiceCallFollowUpService voiceCallFollowUpService,
                             PhoneBlacklistService phoneBlacklistService,
@@ -56,7 +54,6 @@ public class MaxUpdateHandler {
         this.wbStorageStateImportService = wbStorageStateImportService;
         this.wildberriesScraper = wildberriesScraper;
         this.maxBotUiService = maxBotUiService;
-        this.alertCallRequestService = alertCallRequestService;
         this.voiceAlertService = voiceAlertService;
         this.voiceCallFollowUpService = voiceCallFollowUpService;
         this.phoneBlacklistService = phoneBlacklistService;
@@ -151,10 +148,6 @@ public class MaxUpdateHandler {
         if (payload.startsWith("account:unlink:")) {
             long accountId = parseAccountId(payload, "account:unlink:");
             unlinkAccount(chatId, callbackId, accountId);
-            return;
-        }
-        if (payload.startsWith("alert:call:")) {
-            triggerAlertVoiceCall(chat, callbackId, payload.substring("alert:call:".length()));
             return;
         }
 
@@ -380,45 +373,6 @@ public class MaxUpdateHandler {
         maxMessagingService.sendToChat(chatId, "Запускаю тестовый звонок...");
         VoiceCallResult callResult = voiceAlertService.callTarget(chat.phoneNumber(), "");
         voiceCallFollowUpService.sendCallResultAsync(chatId, chat.phoneNumber(), callResult, "");
-    }
-
-    private void triggerAlertVoiceCall(ChatSubscription chat, String callbackId, String requestId) {
-        long chatId = chat.chatId();
-        if (!properties.getAlert().isVoiceCallEnabled() || !chat.callEnabled()) {
-            maxMessagingService.answerCallback(chatId, callbackId, "Звонки для тревог сейчас выключены.", null);
-            return;
-        }
-        if (!isVoiceAllowedFor(chat.userId())) {
-            maxMessagingService.answerCallback(chatId, callbackId, "Запуск звонка сейчас недоступен для этого пользователя.", null);
-            return;
-        }
-        if (!voiceAlertService.isConfigured()) {
-            maxMessagingService.answerCallback(chatId, callbackId, "Провайдер звонков сейчас не настроен.", null);
-            return;
-        }
-        if (chat.phoneNumber() == null || chat.phoneNumber().isBlank()) {
-            maxMessagingService.answerCallback(chatId, callbackId, "Сначала укажи номер в разделе Телефон.", maxBotUiService.buildPhoneMenu(chat));
-            return;
-        }
-        if (phoneBlacklistService.isBlacklisted(chat.phoneNumber())) {
-            maxMessagingService.answerCallback(chatId, callbackId, phoneBlacklistService.buildBlockedMessage(), null);
-            return;
-        }
-        if (voiceCallFollowUpService.isCallFlowActive(chatId) || !voiceCallFollowUpService.tryBeginCallFlow(chatId)) {
-            maxMessagingService.answerCallback(chatId, callbackId, "Звонок уже выполняется. Дождитесь результата.", null);
-            return;
-        }
-
-        AlertCallRequestService.AlertCallRequest request = alertCallRequestService.take(requestId);
-        if (request == null || request.chatId() != chatId) {
-            voiceCallFollowUpService.clearCallFlow(chatId);
-            maxMessagingService.answerCallback(chatId, callbackId, "Кнопка звонка уже устарела или была использована.", null);
-            return;
-        }
-
-        maxMessagingService.answerCallback(chatId, callbackId, "Запускаю звонок...", null);
-        VoiceCallResult callResult = voiceAlertService.callTargetOnce(request.phoneNumber(), request.spokenText());
-        voiceCallFollowUpService.sendCallResultAsync(chatId, request.phoneNumber(), callResult, request.spokenText(), false);
     }
 
     private boolean isVoiceAllowedFor(Long userId) {
