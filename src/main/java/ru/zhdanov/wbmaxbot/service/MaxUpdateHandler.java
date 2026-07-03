@@ -403,19 +403,15 @@ public class MaxUpdateHandler {
             maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage(phoneBlacklistService.buildBlockedMessage()));
             return;
         }
-        if (properties.getTelephony().getExolve().getServiceId() == null
-                || properties.getTelephony().getExolve().getServiceId().isBlank()) {
-            maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Для /call нужен настроенный APP_TELEPHONY_EXOLVE_SERVICE_ID."));
-            return;
-        }
         if (!voiceCallFollowUpService.tryBeginCallFlow(chatId)) {
             maxMessagingService.sendToChat(chatId, maxBotUiService.buildErrorMessage("Предыдущий звонок ещё обрабатывается. Подожди расшифровку."));
             return;
         }
 
         maxMessagingService.sendToChat(chatId, "Запускаю тестовый звонок...");
-        VoiceCallResult callResult = voiceAlertService.callTarget(chat.phoneNumber(), "");
-        voiceCallFollowUpService.sendCallResultAsync(chatId, chat.phoneNumber(), callResult, "");
+        String testVoiceText = "Тестовый звонок от бота WB Last Mile. Проверьте, пожалуйста, что голос и соединение работают нормально.";
+        VoiceCallResult callResult = voiceAlertService.callTarget(chat.phoneNumber(), testVoiceText);
+        voiceCallFollowUpService.sendCallResultAsync(chatId, chat.phoneNumber(), callResult, testVoiceText);
     }
 
     private boolean isVoiceAllowedFor(Long userId) {

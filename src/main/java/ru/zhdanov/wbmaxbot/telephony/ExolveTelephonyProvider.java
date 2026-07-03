@@ -59,7 +59,10 @@ public class ExolveTelephonyProvider implements TelephonyProvider {
         payload.put("source", normalizedSource);
         payload.put("destination", normalizedDestination);
         String mode;
-        if (hasText(exolve.getServiceId())) {
+        if (hasText(spokenText)) {
+            payload.put("tts", buildTtsPayload(exolve, spokenText));
+            mode = "tts";
+        } else if (hasText(exolve.getServiceId())) {
             payload.put("service_id", exolve.getServiceId().trim());
             mode = "service_id";
         } else {

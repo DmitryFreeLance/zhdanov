@@ -517,9 +517,7 @@ public class ReportCoordinator {
                     maxBotUiService.buildErrorMessage(phoneBlacklistService.buildBlockedAutoCallMessage()));
             voiceCallEnabled = false;
         }
-        String voiceText = shouldUseSilentExolveMessage()
-                ? ""
-                : notificationFormatter.buildVoiceText(activeTriggers);
+        String voiceText = notificationFormatter.buildVoiceText(activeTriggers);
         boolean callFlowReserved = false;
         Long attemptId = null;
         VoiceCallResult callResult;
@@ -582,13 +580,6 @@ public class ReportCoordinator {
             voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), account.accountId(), chat.phoneNumber(), callResult, voiceText, attemptId);
         }
     }
-
-    private boolean shouldUseSilentExolveMessage() {
-        return "exolve".equalsIgnoreCase(properties.getTelephony().getProvider())
-                && properties.getTelephony().getExolve().getServiceId() != null
-                && !properties.getTelephony().getExolve().getServiceId().isBlank();
-    }
-
     private List<AlertTrigger> evaluateTriggers(ScrapeResult result, ChatSubscription chat) {
         List<AlertTrigger> triggers = new ArrayList<>();
         for (ReportRow row : result.rows()) {
