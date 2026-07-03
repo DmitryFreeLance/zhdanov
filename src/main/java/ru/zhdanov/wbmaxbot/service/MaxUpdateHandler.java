@@ -409,9 +409,18 @@ public class MaxUpdateHandler {
         }
 
         maxMessagingService.sendToChat(chatId, "Запускаю тестовый звонок...");
-        String testVoiceText = "Тестовый звонок от бота WB Last Mile. Проверьте, пожалуйста, что голос и соединение работают нормально.";
+        String testVoiceText = resolveManualCallText();
         VoiceCallResult callResult = voiceAlertService.callTarget(chat.phoneNumber(), testVoiceText);
         voiceCallFollowUpService.sendCallResultAsync(chatId, chat.phoneNumber(), callResult, testVoiceText);
+    }
+
+    private String resolveManualCallText() {
+        if ("exolve".equalsIgnoreCase(properties.getTelephony().getProvider())
+                && properties.getTelephony().getExolve().getServiceId() != null
+                && !properties.getTelephony().getExolve().getServiceId().isBlank()) {
+            return "";
+        }
+        return "Тестовый звонок от бота WB Last Mile. Проверьте, пожалуйста, что голос и соединение работают нормально.";
     }
 
     private boolean isVoiceAllowedFor(Long userId) {

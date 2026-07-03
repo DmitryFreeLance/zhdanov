@@ -518,6 +518,7 @@ public class ReportCoordinator {
             voiceCallEnabled = false;
         }
         String voiceText = notificationFormatter.buildVoiceText(activeTriggers);
+        String callPayloadText = resolveAlertCallText(voiceText);
         boolean callFlowReserved = false;
         Long attemptId = null;
         VoiceCallResult callResult;
@@ -535,7 +536,7 @@ public class ReportCoordinator {
                         "Previous voice call follow-up is still in progress");
             } else {
                 callFlowReserved = true;
-                callResult = voiceAlertService.callTarget(chat.phoneNumber(), voiceText);
+                callResult = voiceAlertService.callTarget(chat.phoneNumber(), callPayloadText);
                 attemptId = voiceCallAttemptRepository.createAttempt(
                         OffsetDateTime.now(zoneId),
                         chat.chatId(),
@@ -577,8 +578,17 @@ public class ReportCoordinator {
         }
 
         if (voiceCallEnabled && callFlowReserved) {
-            voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), account.accountId(), chat.phoneNumber(), callResult, voiceText, attemptId);
+            voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), account.accountId(), chat.phoneNumber(), callResult, callPayloadText, attemptId);
         }
+    }
+
+    private String resolveAlertCallText(String voiceText) {
+        if ("exolve".equalsIgnoreCase(properties.getTelephony().getProvider())
+                && properties.getTelephony().getExolve().getServiceId() != null
+                && !properties.getTelephony().getExolve().getServiceId().isBlank()) {
+            return "";
+        }
+        return voiceText;
     }
     private List<AlertTrigger> evaluateTriggers(ScrapeResult result, ChatSubscription chat) {
         List<AlertTrigger> triggers = new ArrayList<>();
