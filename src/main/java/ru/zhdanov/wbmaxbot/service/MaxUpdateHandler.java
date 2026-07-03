@@ -627,7 +627,7 @@ public class MaxUpdateHandler {
         String start = voiceCallPolicyService.normalizeWindowTime(parts[0]);
         String end = voiceCallPolicyService.normalizeWindowTime(parts[1]);
         if (LocalTime.parse(start).equals(LocalTime.parse(end))) {
-            throw new IllegalArgumentException("Начало и конец окна не должны совпадать. Для круглосуточного режима используйте кнопку 24/7.");
+            throw new IllegalArgumentException("Начало и конец окна не должны совпадать. Для круглосуточного режима очистите окно дозвона.");
         }
         return new String[]{start, end};
     }
@@ -635,7 +635,7 @@ public class MaxUpdateHandler {
     private int parseCallDailyLimit(String rawText) {
         try {
             int value = Integer.parseInt(rawText.trim());
-            if (value < 1 || value > VoiceCallPolicyService.HARD_MAX_DAILY_CALLS_PER_ACCOUNT) {
+            if (value < 1 || value > VoiceCallPolicyService.HARD_MAX_DAILY_CALLS_PER_CHAT) {
                 throw new IllegalArgumentException("Введите число от 1 до 5.");
             }
             return value;

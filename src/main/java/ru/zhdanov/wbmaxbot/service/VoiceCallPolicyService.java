@@ -13,7 +13,7 @@ import java.time.format.DateTimeParseException;
 @Service
 public class VoiceCallPolicyService {
 
-    public static final int HARD_MAX_DAILY_CALLS_PER_ACCOUNT = 5;
+    public static final int HARD_MAX_DAILY_CALLS_PER_CHAT = 5;
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -59,16 +59,7 @@ public class VoiceCallPolicyService {
             return new AutoCallDecision(
                     false,
                     "daily_limit_reached",
-                    "Достигнут лимит автозвонков за сутки: " + configuredLimit + "."
-            );
-        }
-
-        int accountAttempts = voiceCallAttemptRepository.countStartedAutoAttemptsForAccount(accountId, dayStart, nextDayStart);
-        if (accountAttempts >= HARD_MAX_DAILY_CALLS_PER_ACCOUNT) {
-            return new AutoCallDecision(
-                    false,
-                    "account_hard_limit_reached",
-                    "Достигнут жёсткий лимит: не более " + HARD_MAX_DAILY_CALLS_PER_ACCOUNT + " автозвонков в сутки на один аккаунт."
+                    "Достигнут лимит автозвонков за сутки для этого пользователя: " + configuredLimit + "."
             );
         }
 
@@ -90,9 +81,9 @@ public class VoiceCallPolicyService {
     public int resolveConfiguredDailyLimit(ChatSubscription chat) {
         int configured = chat.callMaxDailyAttempts();
         if (configured <= 0) {
-            configured = HARD_MAX_DAILY_CALLS_PER_ACCOUNT;
+            configured = HARD_MAX_DAILY_CALLS_PER_CHAT;
         }
-        return Math.min(HARD_MAX_DAILY_CALLS_PER_ACCOUNT, configured);
+        return Math.min(HARD_MAX_DAILY_CALLS_PER_CHAT, configured);
     }
 
     public String normalizeWindowTime(String rawValue) {

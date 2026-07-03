@@ -505,17 +505,54 @@ public class ReportCoordinator {
         }
 
         if (activeTriggers.isEmpty()) {
+            if (chat.callEnabled() && chat.phoneNumber() != null && !chat.phoneNumber().isBlank()) {
+                log.info("Auto-call not considered because no alert triggers matched. chatId={}, accountId={}, phone={}, parkingFilter={}, shkThreshold={}, ratioThreshold={}",
+                        chat.chatId(),
+                        account.accountId(),
+                        maskPhone(chat.phoneNumber()),
+                        chat.alertParking(),
+                        chat.shkThreshold(),
+                        chat.ratioThreshold());
+            }
             return;
         }
+
+        log.info("Alert triggers matched. chatId={}, accountId={}, phone={}, triggers={}",
+                chat.chatId(),
+                account.accountId(),
+                maskPhone(chat.phoneNumber()),
+                activeTriggers.stream().map(AlertTrigger::dedupeKey).toList());
 
         boolean voiceCallEnabled = properties.getAlert().isVoiceCallEnabled()
                 && chat.callEnabled()
                 && isVoiceAllowedFor(chat);
+        String autoCallStatusText;
         boolean blacklistedPhone = voiceCallEnabled && phoneBlacklistService.isBlacklisted(chat.phoneNumber());
         if (blacklistedPhone) {
             maxMessagingService.sendToChat(chat.chatId(),
                     maxBotUiService.buildErrorMessage(phoneBlacklistService.buildBlockedAutoCallMessage()));
             voiceCallEnabled = false;
+            autoCallStatusText = phoneBlacklistService.buildBlockedAutoCallMessage();
+            log.info("Auto-call skipped because phone is blacklisted. chatId={}, accountId={}, phone={}",
+                    chat.chatId(), account.accountId(), maskPhone(chat.phoneNumber()));
+        } else if (!properties.getAlert().isVoiceCallEnabled()) {
+            autoCallStatusText = "Автодозвон отключён в конфигурации бота.";
+            log.info("Auto-call skipped because voice calling is disabled in configuration. chatId={}, accountId={}",
+                    chat.chatId(), account.accountId());
+        } else if (!chat.callEnabled()) {
+            autoCallStatusText = "Автодозвон выключен в настройках этого чата.";
+            log.info("Auto-call skipped because it is disabled in chat settings. chatId={}, accountId={}",
+                    chat.chatId(), account.accountId());
+        } else if (!isVoiceAllowedFor(chat)) {
+            autoCallStatusText = "Автодозвон недоступен для этого пользователя.";
+            log.info("Auto-call skipped because user is not in allow list. chatId={}, accountId={}, userId={}",
+                    chat.chatId(), account.accountId(), chat.userId());
+        } else if (chat.phoneNumber() == null || chat.phoneNumber().isBlank()) {
+            autoCallStatusText = "Номер для автодозвона не задан.";
+            log.info("Auto-call skipped because phone number is empty. chatId={}, accountId={}",
+                    chat.chatId(), account.accountId());
+        } else {
+            autoCallStatusText = "Автодозвон запускается.";
         }
         String voiceText = notificationFormatter.buildVoiceText(activeTriggers);
         String callPayloadText = resolveAlertCallText(voiceText);
@@ -528,14 +565,28 @@ public class ReportCoordinator {
             VoiceCallPolicyService.AutoCallDecision callDecision = voiceCallPolicyService.evaluate(chat, account.accountId(), OffsetDateTime.now(zoneId));
             if (!callDecision.allowed()) {
                 voiceCallEnabled = false;
+                autoCallStatusText = callDecision.reason();
+                log.info("Auto-call skipped by policy. chatId={}, accountId={}, phone={}, code={}, reason={}",
+                        chat.chatId(),
+                        account.accountId(),
+                        maskPhone(chat.phoneNumber()),
+                        callDecision.code(),
+                        callDecision.reason());
                 callResult = VoiceCallResult.success("reminder-only", null, callDecision.reason());
             } else if (!voiceCallFollowUpService.tryBeginCallFlow(chat.chatId())) {
                 log.info("Skipping voice call because previous follow-up is still active. chatId={}, phone={}",
                         chat.chatId(), chat.phoneNumber());
+                autoCallStatusText = "Предыдущий дозвон ещё обрабатывается. Новый автозвонок пока не запускаю.";
+                voiceCallEnabled = false;
                 callResult = VoiceCallResult.failure(properties.getTelephony().getProvider(),
                         "Previous voice call follow-up is still in progress");
             } else {
                 callFlowReserved = true;
+                log.info("Starting auto-call for alert. chatId={}, accountId={}, phone={}, triggers={}",
+                        chat.chatId(),
+                        account.accountId(),
+                        maskPhone(chat.phoneNumber()),
+                        activeTriggers.stream().map(AlertTrigger::dedupeKey).toList());
                 callResult = voiceAlertService.callTarget(chat.phoneNumber(), callPayloadText);
                 attemptId = voiceCallAttemptRepository.createAttempt(
                         OffsetDateTime.now(zoneId),
@@ -556,7 +607,7 @@ public class ReportCoordinator {
             String alertMessage = notificationFormatter.buildAlertMessage(trigger, voiceCallEnabled, maskPhone(account.phoneNumber()));
             String messageStatus = maxMessagingService.sendToChat(
                     chat.chatId(),
-                    maxBotUiService.buildAlertMessage(alertMessage, chat.phoneNumber(), voiceCallEnabled)
+                    maxBotUiService.buildAlertMessage(alertMessage, chat.phoneNumber(), voiceCallEnabled, autoCallStatusText)
             );
 
             String dedupeKey = chat.chatId() + ":" + account.accountId() + ":" + trigger.dedupeKey();

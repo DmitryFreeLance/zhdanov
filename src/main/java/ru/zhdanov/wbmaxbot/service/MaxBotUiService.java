@@ -243,7 +243,7 @@ public class MaxBotUiService {
                 🔁 Введите максимум автозвонков в сутки для этого чата.
 
                 Допустимо от 1 до 5.
-                Значение 5 является жёстким верхним пределом на один аккаунт.
+                Значение 5 является жёстким верхним пределом для одного пользователя.
                 """.trim(),
                 row(callback("🔙 Назад", "menu:phone"))
         );
@@ -467,8 +467,14 @@ public class MaxBotUiService {
         return buildErrorMessage("Не удалось сформировать отчёт. Попробуйте ещё раз.");
     }
 
-    public MaxOutgoingMessage buildAlertMessage(String text, String phoneNumber, boolean voiceCallEnabled) {
+    public MaxOutgoingMessage buildAlertMessage(String text,
+                                                String phoneNumber,
+                                                boolean voiceCallEnabled,
+                                                String autoCallStatusText) {
         String finalText = text;
+        if (autoCallStatusText != null && !autoCallStatusText.isBlank()) {
+            finalText += "\n\n☎️ " + autoCallStatusText;
+        }
         if (hasPhone(phoneNumber)) {
             String suffix = voiceCallEnabled
                     ? "\n\n📞 Если нужно перезвонить вручную: " + phoneNumber
@@ -572,7 +578,7 @@ public class MaxBotUiService {
     }
 
     private String formatCallDailyLimit(ChatSubscription chat) {
-        return String.valueOf(Math.min(VoiceCallPolicyService.HARD_MAX_DAILY_CALLS_PER_ACCOUNT, Math.max(1, chat.callMaxDailyAttempts())));
+        return String.valueOf(Math.min(VoiceCallPolicyService.HARD_MAX_DAILY_CALLS_PER_CHAT, Math.max(1, chat.callMaxDailyAttempts())));
     }
 
     private String formatCallAnswerCooldown(ChatSubscription chat) {
