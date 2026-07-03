@@ -30,7 +30,7 @@ public class SubscriptionRepository {
                     call_time_window_start, call_time_window_end, call_max_daily_attempts, call_answer_cooldown_minutes,
                     created_at, last_seen_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(chat_id) do update set
                     user_id = excluded.user_id,
                     title = excluded.title,
