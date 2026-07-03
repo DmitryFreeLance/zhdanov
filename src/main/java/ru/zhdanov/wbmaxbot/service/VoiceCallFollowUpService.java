@@ -195,6 +195,12 @@ public class VoiceCallFollowUpService {
             String finalStatus = finalCallInfo.status();
             log.info("Exolve final call status received. chatId={}, phone={}, callId={}, status={}",
                     chatId, maskPhone(phoneNumber), callId, finalStatus);
+            if (shouldStartCooldownAfterCall(finalCallInfo)) {
+                OffsetDateTime cooldownAnchor = resolveAnsweredAt(finalCallInfo);
+                chatSettingsService.markLastCallAnsweredAt(chatId, cooldownAnchor);
+                log.info("Recorded auto-call cooldown anchor. chatId={}, phone={}, callId={}, status={}, cooldownFrom={}",
+                        chatId, maskPhone(phoneNumber), callId, finalStatus, cooldownAnchor);
+            }
             if (!TRANSCRIPT_POSSIBLE_STATUSES.contains(finalStatus)) {
                 log.warn("Exolve transcription skipped because final status is not eligible. chatId={}, phone={}, callId={}, status={}",
                         chatId, maskPhone(phoneNumber), callId, finalStatus);
@@ -213,13 +219,19 @@ public class VoiceCallFollowUpService {
             if (transcription == null || transcription.isBlank()) {
                 log.warn("Exolve transcription not available yet, sending fallback text. chatId={}, phone={}, callId={}",
                         chatId, maskPhone(phoneNumber), callId);
-                updateAttempt(attemptId, currentCallResult, "transcription_missing", false);
+                if (shouldStartCooldownAfterCall(finalCallInfo)) {
+                    updateAttempt(attemptId, currentCallResult, "completed_without_transcription", true);
+                } else {
+                    updateAttempt(attemptId, currentCallResult, "transcription_missing", false);
+                }
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildVoiceCallFollowUpMessage(
                                 phoneNumber,
                                 finalStatus,
                                 hasFallbackText ? "Текст звонка" : "Детали звонка",
-                                hasFallbackText ? fallbackText : "Расшифровка пока недоступна."
+                                shouldStartCooldownAfterCall(finalCallInfo)
+                                        ? "Расшифровка пока недоступна, но звонок состоялся. Повторный автодозвон временно остановлен."
+                                        : hasFallbackText ? fallbackText : "Расшифровка пока недоступна."
                         ));
             } else {
                 if (looksLikeAnsweringMachine(transcription)) {
@@ -238,9 +250,6 @@ public class VoiceCallFollowUpService {
                 log.info("Exolve transcription received. chatId={}, phone={}, callId={}, length={}",
                         chatId, maskPhone(phoneNumber), callId, transcription.length());
                 updateAttempt(attemptId, currentCallResult, "human_answered", true);
-                if (attemptId != null && accountId != null) {
-                    chatSettingsService.markLastCallAnsweredAt(chatId, OffsetDateTime.now(zoneId));
-                }
                 maxMessagingService.sendToChat(chatId,
                         maxBotUiService.buildVoiceCallTranscriptionMessage(phoneNumber, finalStatus, transcription));
             }
@@ -281,7 +290,7 @@ public class VoiceCallFollowUpService {
     }
 
     private CallInfo waitForFinalCallInfo(String callId) throws IOException, InterruptedException {
-        CallInfo lastInfo = new CallInfo(callId, "unknown", null, null, null, null, null);
+        CallInfo lastInfo = new CallInfo(callId, "unknown", null, null, null, null, null, 0);
         for (int attempt = 0; attempt < 24; attempt++) {
             JsonNode body = postJson(
                     properties.getTelephony().getExolve().getBaseUrl() + "/call/v1/GetInfo",
@@ -295,7 +304,8 @@ public class VoiceCallFollowUpService {
                     textOrNull(body, "started"),
                     textOrNull(body, "ended"),
                     textOrNull(body, "source"),
-                    textOrNull(body, "destination")
+                    textOrNull(body, "destination"),
+                    body.path("duration").asInt(0)
             );
             log.info("Exolve GetInfo poll. callId={}, attempt={}/24, status={}, body={}",
                     callId, attempt + 1, status, truncate(body.toString()));
@@ -424,6 +434,24 @@ public class VoiceCallFollowUpService {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private boolean shouldStartCooldownAfterCall(CallInfo callInfo) {
+        if (callInfo == null) {
+            return false;
+        }
+        return "completed".equalsIgnoreCase(callInfo.status());
+    }
+
+    private OffsetDateTime resolveAnsweredAt(CallInfo callInfo) {
+        OffsetDateTime answeredAt = parseExolveTime(callInfo.endedAt());
+        if (answeredAt == null) {
+            answeredAt = parseExolveTime(callInfo.startedAt());
+        }
+        if (answeredAt == null) {
+            answeredAt = OffsetDateTime.now(zoneId);
+        }
+        return answeredAt.atZoneSameInstant(zoneId).toOffsetDateTime();
     }
 
     private String extractMatchingTranscriptionFromList(JsonNode body, CallInfo callInfo) {
@@ -580,6 +608,7 @@ public class VoiceCallFollowUpService {
                             String startedAt,
                             String endedAt,
                             String source,
-                            String destination) {
+                            String destination,
+                            int durationSeconds) {
     }
 }
