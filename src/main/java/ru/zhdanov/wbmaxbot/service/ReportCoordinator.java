@@ -15,6 +15,7 @@ import ru.zhdanov.wbmaxbot.model.ScrapeResult;
 import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
 import ru.zhdanov.wbmaxbot.repository.AlertEventRepository;
 import ru.zhdanov.wbmaxbot.repository.ReportRepository;
+import ru.zhdanov.wbmaxbot.repository.VoiceCallAttemptRepository;
 
 import java.nio.file.Files;
 import java.time.OffsetDateTime;
@@ -55,11 +56,13 @@ public class ReportCoordinator {
     private final MaxMessagingService maxMessagingService;
     private final VoiceAlertService voiceAlertService;
     private final VoiceCallFollowUpService voiceCallFollowUpService;
+    private final VoiceCallPolicyService voiceCallPolicyService;
     private final PhoneBlacklistService phoneBlacklistService;
     private final ChatSettingsService chatSettingsService;
     private final WbAccountService wbAccountService;
     private final ReportRepository reportRepository;
     private final AlertEventRepository alertEventRepository;
+    private final VoiceCallAttemptRepository voiceCallAttemptRepository;
     private final ObjectMapper objectMapper;
     private final ZoneId zoneId;
     private final ExecutorService scheduledReportExecutor;
@@ -77,11 +80,13 @@ public class ReportCoordinator {
                              MaxMessagingService maxMessagingService,
                              VoiceAlertService voiceAlertService,
                              VoiceCallFollowUpService voiceCallFollowUpService,
+                             VoiceCallPolicyService voiceCallPolicyService,
                              PhoneBlacklistService phoneBlacklistService,
                              ChatSettingsService chatSettingsService,
                              WbAccountService wbAccountService,
                              ReportRepository reportRepository,
                              AlertEventRepository alertEventRepository,
+                             VoiceCallAttemptRepository voiceCallAttemptRepository,
                              ObjectMapper objectMapper) {
         this.properties = properties;
         this.wildberriesScraper = wildberriesScraper;
@@ -90,11 +95,13 @@ public class ReportCoordinator {
         this.maxMessagingService = maxMessagingService;
         this.voiceAlertService = voiceAlertService;
         this.voiceCallFollowUpService = voiceCallFollowUpService;
+        this.voiceCallPolicyService = voiceCallPolicyService;
         this.phoneBlacklistService = phoneBlacklistService;
         this.chatSettingsService = chatSettingsService;
         this.wbAccountService = wbAccountService;
         this.reportRepository = reportRepository;
         this.alertEventRepository = alertEventRepository;
+        this.voiceCallAttemptRepository = voiceCallAttemptRepository;
         this.objectMapper = objectMapper;
         this.zoneId = ZoneId.of(properties.getZoneId());
         this.manualRunStates = new ConcurrentHashMap<>();
@@ -514,17 +521,36 @@ public class ReportCoordinator {
                 ? ""
                 : notificationFormatter.buildVoiceText(activeTriggers);
         boolean callFlowReserved = false;
+        Long attemptId = null;
         VoiceCallResult callResult;
         if (!voiceCallEnabled) {
             callResult = VoiceCallResult.success("reminder-only", null, "Voice calls disabled; sent manual call reminder instead");
-        } else if (!voiceCallFollowUpService.tryBeginCallFlow(chat.chatId())) {
-            log.info("Skipping voice call because previous follow-up is still active. chatId={}, phone={}",
-                    chat.chatId(), chat.phoneNumber());
-            callResult = VoiceCallResult.failure(properties.getTelephony().getProvider(),
-                    "Previous voice call follow-up is still in progress");
         } else {
-            callFlowReserved = true;
-            callResult = voiceAlertService.callTarget(chat.phoneNumber(), voiceText);
+            VoiceCallPolicyService.AutoCallDecision callDecision = voiceCallPolicyService.evaluate(chat, account.accountId(), OffsetDateTime.now(zoneId));
+            if (!callDecision.allowed()) {
+                voiceCallEnabled = false;
+                callResult = VoiceCallResult.success("reminder-only", null, callDecision.reason());
+            } else if (!voiceCallFollowUpService.tryBeginCallFlow(chat.chatId())) {
+                log.info("Skipping voice call because previous follow-up is still active. chatId={}, phone={}",
+                        chat.chatId(), chat.phoneNumber());
+                callResult = VoiceCallResult.failure(properties.getTelephony().getProvider(),
+                        "Previous voice call follow-up is still in progress");
+            } else {
+                callFlowReserved = true;
+                callResult = voiceAlertService.callTarget(chat.phoneNumber(), voiceText);
+                attemptId = voiceCallAttemptRepository.createAttempt(
+                        OffsetDateTime.now(zoneId),
+                        chat.chatId(),
+                        account.accountId(),
+                        "auto",
+                        chat.phoneNumber(),
+                        callResult.provider(),
+                        callResult.externalId(),
+                        callResult.success() ? "started" : "failed_start",
+                        callResult.success(),
+                        callResult.details()
+                );
+            }
         }
 
         for (AlertTrigger trigger : activeTriggers) {
@@ -553,7 +579,7 @@ public class ReportCoordinator {
         }
 
         if (voiceCallEnabled && callFlowReserved) {
-            voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), chat.phoneNumber(), callResult, voiceText);
+            voiceCallFollowUpService.sendCallResultAsync(chat.chatId(), account.accountId(), chat.phoneNumber(), callResult, voiceText, attemptId);
         }
     }
 

@@ -10,6 +10,7 @@ import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
 import ru.zhdanov.wbmaxbot.model.VoiceCallResult;
 
 import java.nio.file.Files;
+import java.time.LocalTime;
 import java.util.Locale;
 import java.util.concurrent.CompletionException;
 
@@ -29,6 +30,7 @@ public class MaxUpdateHandler {
     private final MaxBotUiService maxBotUiService;
     private final VoiceAlertService voiceAlertService;
     private final VoiceCallFollowUpService voiceCallFollowUpService;
+    private final VoiceCallPolicyService voiceCallPolicyService;
     private final PhoneBlacklistService phoneBlacklistService;
     private final ru.zhdanov.wbmaxbot.config.AppProperties properties;
 
@@ -43,6 +45,7 @@ public class MaxUpdateHandler {
                             MaxBotUiService maxBotUiService,
                             VoiceAlertService voiceAlertService,
                             VoiceCallFollowUpService voiceCallFollowUpService,
+                            VoiceCallPolicyService voiceCallPolicyService,
                             PhoneBlacklistService phoneBlacklistService,
                             ru.zhdanov.wbmaxbot.config.AppProperties properties) {
         this.maxMessagingService = maxMessagingService;
@@ -56,6 +59,7 @@ public class MaxUpdateHandler {
         this.maxBotUiService = maxBotUiService;
         this.voiceAlertService = voiceAlertService;
         this.voiceCallFollowUpService = voiceCallFollowUpService;
+        this.voiceCallPolicyService = voiceCallPolicyService;
         this.phoneBlacklistService = phoneBlacklistService;
         this.properties = properties;
     }
@@ -199,6 +203,18 @@ public class MaxUpdateHandler {
                 chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_PHONE);
                 maxMessagingService.answerCallback(chatId, callbackId, "Жду номер телефона", maxBotUiService.buildPhonePrompt());
             }
+            case "input:call-window" -> {
+                chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_CALL_WINDOW);
+                maxMessagingService.answerCallback(chatId, callbackId, "Жду окно дозвона", maxBotUiService.buildCallWindowPrompt());
+            }
+            case "input:call-daily-limit" -> {
+                chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_CALL_DAILY_LIMIT);
+                maxMessagingService.answerCallback(chatId, callbackId, "Жду лимит звонков", maxBotUiService.buildCallDailyLimitPrompt());
+            }
+            case "input:call-answer-cooldown" -> {
+                chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_CALL_ANSWER_COOLDOWN);
+                maxMessagingService.answerCallback(chatId, callbackId, "Жду паузу после ответа", maxBotUiService.buildCallAnswerCooldownPrompt());
+            }
             case "input:shk" -> {
                 chatSettingsService.setPendingInputState(chatId, ChatSettingsService.PENDING_SHK_THRESHOLD);
                 maxMessagingService.answerCallback(chatId, callbackId, "Жду порог ШК", maxBotUiService.buildShkPrompt());
@@ -224,6 +240,12 @@ public class MaxUpdateHandler {
                 maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildPhoneClearedMessage(),
                         maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
             }
+            case "call-window:clear" -> {
+                cancelPendingInput(chat);
+                chatSettingsService.clearCallTimeWindow(chatId);
+                maxMessagingService.answerCallback(chatId, callbackId, maxBotUiService.buildCallWindowClearedMessage(),
+                        maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
+            }
             case "call:toggle" -> toggleCall(chatId, callbackId, chat);
             case "wb:auth:start" -> startWbAuth(chatId, callbackId, chat);
             case "wb:auth:resend" -> resendWbAuthCode(chatId, callbackId, chat);
@@ -242,6 +264,27 @@ public class MaxUpdateHandler {
                     chatSettingsService.setPhoneNumber(chatId, phone);
                     chatSettingsService.clearPendingInputState(chatId);
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildPhoneSavedMessage(phone));
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
+                }
+                case ChatSettingsService.PENDING_CALL_WINDOW -> {
+                    String[] window = parseCallWindow(rawText);
+                    chatSettingsService.setCallTimeWindow(chatId, window[0], window[1]);
+                    chatSettingsService.clearPendingInputState(chatId);
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildCallWindowSavedMessage(window[0], window[1]));
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
+                }
+                case ChatSettingsService.PENDING_CALL_DAILY_LIMIT -> {
+                    int dailyLimit = parseCallDailyLimit(rawText);
+                    chatSettingsService.setCallMaxDailyAttempts(chatId, dailyLimit);
+                    chatSettingsService.clearPendingInputState(chatId);
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildCallDailyLimitSavedMessage(dailyLimit));
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
+                }
+                case ChatSettingsService.PENDING_CALL_ANSWER_COOLDOWN -> {
+                    int cooldownMinutes = parseCallAnswerCooldownMinutes(rawText);
+                    chatSettingsService.setCallAnswerCooldownMinutes(chatId, cooldownMinutes);
+                    chatSettingsService.clearPendingInputState(chatId);
+                    maxMessagingService.sendToChat(chatId, maxBotUiService.buildCallAnswerCooldownSavedMessage(cooldownMinutes));
                     maxMessagingService.sendToChat(chatId, maxBotUiService.buildPhoneMenu(chatSettingsService.getRequired(chatId)));
                 }
                 case ChatSettingsService.PENDING_SHK_THRESHOLD -> {
@@ -567,6 +610,64 @@ public class MaxUpdateHandler {
             return value;
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Введите процент числом, например 90.");
+        }
+    }
+
+    private String[] parseCallWindow(String rawText) {
+        String normalized = rawText == null ? "" : rawText.trim().replace(" ", "");
+        String[] parts = normalized.split("-");
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("Введите окно в формате HH:mm-HH:mm, например 00:00-05:00.");
+        }
+        String start = voiceCallPolicyService.normalizeWindowTime(parts[0]);
+        String end = voiceCallPolicyService.normalizeWindowTime(parts[1]);
+        if (LocalTime.parse(start).equals(LocalTime.parse(end))) {
+            throw new IllegalArgumentException("Начало и конец окна не должны совпадать. Для круглосуточного режима используйте кнопку 24/7.");
+        }
+        return new String[]{start, end};
+    }
+
+    private int parseCallDailyLimit(String rawText) {
+        try {
+            int value = Integer.parseInt(rawText.trim());
+            if (value < 1 || value > VoiceCallPolicyService.HARD_MAX_DAILY_CALLS_PER_ACCOUNT) {
+                throw new IllegalArgumentException("Введите число от 1 до 5.");
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Введите число от 1 до 5.");
+        }
+    }
+
+    private int parseCallAnswerCooldownMinutes(String rawText) {
+        String trimmed = rawText == null ? "" : rawText.trim();
+        if (trimmed.isBlank()) {
+            throw new IllegalArgumentException("Введите число часов или формат часы:минуты, например 5 или 5:30.");
+        }
+        if (trimmed.contains(":")) {
+            String[] parts = trimmed.split(":");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("Введите число часов или формат часы:минуты, например 5 или 5:30.");
+            }
+            try {
+                int hours = Integer.parseInt(parts[0].trim());
+                int minutes = Integer.parseInt(parts[1].trim());
+                if (hours < 0 || minutes < 0 || minutes >= 60 || (hours == 0 && minutes == 0)) {
+                    throw new IllegalArgumentException("Пауза должна быть больше нуля.");
+                }
+                return hours * 60 + minutes;
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Введите число часов или формат часы:минуты, например 5 или 5:30.");
+            }
+        }
+        try {
+            int hours = Integer.parseInt(trimmed);
+            if (hours <= 0) {
+                throw new IllegalArgumentException("Пауза должна быть больше нуля.");
+            }
+            return hours * 60;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Введите число часов или формат часы:минуты, например 5 или 5:30.");
         }
     }
 

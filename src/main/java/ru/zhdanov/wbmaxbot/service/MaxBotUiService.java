@@ -6,6 +6,7 @@ import ru.zhdanov.wbmaxbot.model.ChatSubscription;
 import ru.zhdanov.wbmaxbot.model.ChatLinkedWbAccount;
 import ru.zhdanov.wbmaxbot.model.MaxOutgoingMessage;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -36,6 +37,9 @@ public class MaxBotUiService {
                 🅿️ Парковка тревоги: %s
                 ☎️ Дозвон: %s
                 📞 Телефон: %s
+                🕒 Окно дозвона: %s
+                🔁 Лимит звонков/сутки: %s
+                ⏸️ Пауза после ответа: %s
 
                 Выберите действие ниже.
                 """.formatted(
@@ -45,7 +49,10 @@ public class MaxBotUiService {
                 formatRatio(chat),
                 formatAlertParking(chat),
                 chat.callEnabled() ? "включён" : "выключен",
-                formatPhone(chat)
+                formatPhone(chat),
+                formatCallWindow(chat),
+                formatCallDailyLimit(chat),
+                formatCallAnswerCooldown(chat)
         ).trim();
 
         return withKeyboard(text,
@@ -134,12 +141,20 @@ public class MaxBotUiService {
 
                 Текущий номер для этого чата: %s
                 Режим дозвона: %s
+                Окно автодозвона: %s
+                Лимит звонков в сутки: %s
+                Пауза после ответа: %s
+                Следующий автозвонок: %s
 
                 При тревоге бот будет звонить именно на этот номер.
                 Можно ввести новый номер или очистить текущий.
                 """.formatted(
                 formatPhone(chat),
-                chat.callEnabled() ? "включён" : "выключен"
+                chat.callEnabled() ? "включён" : "выключен",
+                formatCallWindow(chat),
+                formatCallDailyLimit(chat),
+                formatCallAnswerCooldown(chat),
+                formatNextAllowedAutoCall(chat)
         ).trim();
         String textWithDialHint = hasPhone(chat.phoneNumber())
                 ? text + "\n\nДля звонка используйте номер: " + chat.phoneNumber()
@@ -147,6 +162,8 @@ public class MaxBotUiService {
 
         List<List<Map<String, Object>>> rows = new ArrayList<>();
         rows.add(row(callback("✏️ Ввести номер", "input:phone"), callback("🗑 Очистить номер", "phone:clear")));
+        rows.add(row(callback("🕒 Окно дозвона", "input:call-window")));
+        rows.add(row(callback("🔁 Лимит/сутки", "input:call-daily-limit"), callback("⏸️ Пауза после ответа", "input:call-answer-cooldown")));
         rows.add(row(callback(toggleCallLabel(chat), "call:toggle")));
         rows.add(row(callback("🔙 Назад", "menu:main")));
         return withKeyboard(textWithDialHint, rows);
@@ -165,6 +182,10 @@ public class MaxBotUiService {
                 Парковка тревоги: %s
                 Дозвон: %s
                 Телефон: %s
+                Окно дозвона: %s
+                Лимит звонков/сутки: %s
+                Пауза после ответа: %s
+                Следующий автозвонок: %s
                 """.formatted(
                 mode,
                 sessionExists ? "готова" : "не найдена",
@@ -174,7 +195,11 @@ public class MaxBotUiService {
                 formatRatio(chat),
                 formatAlertParking(chat),
                 chat.callEnabled() ? "включён" : "выключен",
-                formatPhone(chat)
+                formatPhone(chat),
+                formatCallWindow(chat),
+                formatCallDailyLimit(chat),
+                formatCallAnswerCooldown(chat),
+                formatNextAllowedAutoCall(chat)
         ).trim();
 
         return withKeyboard(text,
@@ -194,6 +219,47 @@ public class MaxBotUiService {
                 89991234567
 
                 Для отмены нажмите кнопку ниже.
+                """.trim(),
+                row(callback("🔙 Назад", "menu:phone"))
+        );
+    }
+
+    public MaxOutgoingMessage buildCallWindowPrompt() {
+        return withKeyboard("""
+                🕒 Введите окно автодозвона в формате HH:mm-HH:mm.
+
+                Примеры:
+                00:00-05:00
+                22:00-06:00
+
+                Вне этого интервала бот не будет звонить автоматически и просто предложит ручной вызов.
+                """.trim(),
+                row(callback("🔙 Назад", "menu:phone"))
+        );
+    }
+
+    public MaxOutgoingMessage buildCallDailyLimitPrompt() {
+        return withKeyboard("""
+                🔁 Введите максимум автозвонков в сутки для этого чата.
+
+                Допустимо от 1 до 5.
+                Значение 5 является жёстким верхним пределом на один аккаунт.
+                """.trim(),
+                row(callback("🔙 Назад", "menu:phone"))
+        );
+    }
+
+    public MaxOutgoingMessage buildCallAnswerCooldownPrompt() {
+        return withKeyboard("""
+                ⏸️ Введите паузу после успешного ответа на звонок.
+
+                Можно указать только часы или часы и минуты.
+
+                Примеры:
+                5
+                5:30
+
+                После ответа абонента бот начнёт звонить снова не раньше этого времени.
                 """.trim(),
                 row(callback("🔙 Назад", "menu:phone"))
         );
@@ -262,6 +328,22 @@ public class MaxBotUiService {
 
     public String buildCallToggleMessage(boolean enabled) {
         return enabled ? "Режим дозвона включён." : "Режим дозвона выключен.";
+    }
+
+    public String buildCallWindowSavedMessage(String start, String end) {
+        return "Окно автодозвона сохранено: " + start + "-" + end + ".";
+    }
+
+    public String buildCallWindowClearedMessage() {
+        return "Окно автодозвона сброшено. Теперь автодозвон доступен круглосуточно.";
+    }
+
+    public String buildCallDailyLimitSavedMessage(int limit) {
+        return "Лимит автозвонков в сутки сохранён: " + limit + ".";
+    }
+
+    public String buildCallAnswerCooldownSavedMessage(int cooldownMinutes) {
+        return "Пауза после ответа сохранена: " + formatDurationMinutes(cooldownMinutes) + ".";
     }
 
     public String buildShkSavedMessage(Integer threshold) {
@@ -481,6 +563,49 @@ public class MaxBotUiService {
 
     private String formatPhone(ChatSubscription chat) {
         return chat.phoneNumber() == null || chat.phoneNumber().isBlank() ? "не указан" : chat.phoneNumber();
+    }
+
+    private String formatCallWindow(ChatSubscription chat) {
+        return hasText(chat.callTimeWindowStart()) && hasText(chat.callTimeWindowEnd())
+                ? chat.callTimeWindowStart() + "-" + chat.callTimeWindowEnd()
+                : "круглосуточно";
+    }
+
+    private String formatCallDailyLimit(ChatSubscription chat) {
+        return String.valueOf(Math.min(VoiceCallPolicyService.HARD_MAX_DAILY_CALLS_PER_ACCOUNT, Math.max(1, chat.callMaxDailyAttempts())));
+    }
+
+    private String formatCallAnswerCooldown(ChatSubscription chat) {
+        return formatDurationMinutes(Math.max(1, chat.callAnswerCooldownMinutes()));
+    }
+
+    private String formatDurationMinutes(int totalMinutes) {
+        int hours = totalMinutes / 60;
+        int minutes = totalMinutes % 60;
+        if (hours > 0 && minutes > 0) {
+            return hours + " ч " + minutes + " мин";
+        }
+        if (hours > 0) {
+            return hours + " ч";
+        }
+        return minutes + " мин";
+    }
+
+    private String formatNextAllowedAutoCall(ChatSubscription chat) {
+        OffsetDateTime lastAnsweredAt = chat.lastCallAnsweredAt();
+        if (lastAnsweredAt == null) {
+            return "сейчас";
+        }
+        OffsetDateTime nextAllowedAt = lastAnsweredAt.plusMinutes(Math.max(1, chat.callAnswerCooldownMinutes()));
+        OffsetDateTime now = OffsetDateTime.now(lastAnsweredAt.getOffset());
+        if (!nextAllowedAt.isAfter(now)) {
+            return "сейчас";
+        }
+        return nextAllowedAt.toLocalDate() + " " + nextAllowedAt.toLocalTime().withSecond(0).withNano(0);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String toggleCallLabel(ChatSubscription chat) {

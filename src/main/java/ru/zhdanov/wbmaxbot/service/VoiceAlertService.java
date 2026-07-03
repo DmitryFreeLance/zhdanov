@@ -49,6 +49,10 @@ public class VoiceAlertService {
     }
 
     public VoiceCallResult callTarget(String targetNumber, String spokenText) {
+        return callTarget(targetNumber, spokenText, false);
+    }
+
+    public VoiceCallResult callTarget(String targetNumber, String spokenText, boolean allowRetryAttempts) {
         TelephonyProvider provider = providers.getOrDefault(properties.getTelephony().getProvider(), noopTelephonyProvider);
         if (!provider.isConfigured()) {
             return VoiceCallResult.failure(provider.providerName(), "Provider is not configured");
@@ -60,7 +64,7 @@ public class VoiceAlertService {
             return VoiceCallResult.failure(provider.providerName(), phoneBlacklistService.buildBlockedMessage());
         }
 
-        int maxAttempts = Math.max(1, properties.getTelephony().getMaxAttempts());
+        int maxAttempts = allowRetryAttempts ? Math.max(1, properties.getTelephony().getMaxAttempts()) : 1;
         int retryDelaySeconds = Math.max(0, properties.getTelephony().getRetryDelaySeconds());
         VoiceCallResult lastResult = VoiceCallResult.failure(provider.providerName(), "Call was not attempted");
         List<String> attemptDetails = new ArrayList<>();

@@ -27,9 +27,10 @@ public class SubscriptionRepository {
                 insert into chat_subscription(
                     chat_id, user_id, title, chat_type, active,
                     auto_report_enabled, report_interval_minutes, shk_threshold, ratio_threshold, alert_parking, call_enabled,
+                    call_time_window_start, call_time_window_end, call_max_daily_attempts, call_answer_cooldown_minutes,
                     created_at, last_seen_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(chat_id) do update set
                     user_id = excluded.user_id,
                     title = excluded.title,
@@ -48,6 +49,10 @@ public class SubscriptionRepository {
                 properties.getAlert().getRatioThreshold(),
                 null,
                 0,
+                null,
+                null,
+                5,
+                300,
                 now.toString(),
                 now.toString()
         );
@@ -68,7 +73,9 @@ public class SubscriptionRepository {
         return jdbcTemplate.query("""
                 select chat_id, user_id, title, chat_type, active,
                        auto_report_enabled, report_interval_minutes, last_report_sent_at,
-                       shk_threshold, ratio_threshold, alert_parking, call_enabled, phone_number, pending_input_state,
+                       shk_threshold, ratio_threshold, alert_parking, call_enabled, phone_number,
+                       call_time_window_start, call_time_window_end, call_max_daily_attempts, call_answer_cooldown_minutes,
+                       last_call_answered_at, pending_input_state,
                        pending_wb_auth_flow_id, pending_wb_auth_phone_number,
                        created_at, last_seen_at
                 from chat_subscription
@@ -83,7 +90,9 @@ public class SubscriptionRepository {
         List<ChatSubscription> rows = jdbcTemplate.query("""
                 select chat_id, user_id, title, chat_type, active,
                        auto_report_enabled, report_interval_minutes, last_report_sent_at,
-                       shk_threshold, ratio_threshold, alert_parking, call_enabled, phone_number, pending_input_state,
+                       shk_threshold, ratio_threshold, alert_parking, call_enabled, phone_number,
+                       call_time_window_start, call_time_window_end, call_max_daily_attempts, call_answer_cooldown_minutes,
+                       last_call_answered_at, pending_input_state,
                        pending_wb_auth_flow_id, pending_wb_auth_phone_number,
                        created_at, last_seen_at
                 from chat_subscription
@@ -174,6 +183,52 @@ public class SubscriptionRepository {
         );
     }
 
+    public void updateCallTimeWindow(long chatId, String start, String end) {
+        jdbcTemplate.update("""
+                update chat_subscription
+                set call_time_window_start = ?,
+                    call_time_window_end = ?
+                where chat_id = ?
+                """,
+                start,
+                end,
+                chatId
+        );
+    }
+
+    public void updateCallMaxDailyAttempts(long chatId, int maxDailyAttempts) {
+        jdbcTemplate.update("""
+                update chat_subscription
+                set call_max_daily_attempts = ?
+                where chat_id = ?
+                """,
+                maxDailyAttempts,
+                chatId
+        );
+    }
+
+    public void updateCallAnswerCooldownMinutes(long chatId, int cooldownMinutes) {
+        jdbcTemplate.update("""
+                update chat_subscription
+                set call_answer_cooldown_minutes = ?
+                where chat_id = ?
+                """,
+                cooldownMinutes,
+                chatId
+        );
+    }
+
+    public void updateLastCallAnsweredAt(long chatId, OffsetDateTime answeredAt) {
+        jdbcTemplate.update("""
+                update chat_subscription
+                set last_call_answered_at = ?
+                where chat_id = ?
+                """,
+                answeredAt == null ? null : answeredAt.toString(),
+                chatId
+        );
+    }
+
     public void updatePendingInputState(long chatId, String pendingInputState) {
         jdbcTemplate.update("""
                 update chat_subscription
@@ -225,6 +280,11 @@ public class SubscriptionRepository {
                 rs.getString("alert_parking"),
                 rs.getInt("call_enabled") == 1,
                 rs.getString("phone_number"),
+                rs.getString("call_time_window_start"),
+                rs.getString("call_time_window_end"),
+                rs.getInt("call_max_daily_attempts"),
+                rs.getInt("call_answer_cooldown_minutes"),
+                parseNullableOffsetDateTime(rs.getString("last_call_answered_at")),
                 rs.getString("pending_input_state"),
                 rs.getString("pending_wb_auth_flow_id"),
                 rs.getString("pending_wb_auth_phone_number"),

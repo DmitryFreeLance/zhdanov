@@ -16,6 +16,9 @@ public class ChatSettingsService {
     public static final String PENDING_SHK_THRESHOLD = "shk-threshold";
     public static final String PENDING_RATIO_THRESHOLD = "ratio-threshold";
     public static final String PENDING_ALERT_PARKING = "alert-parking";
+    public static final String PENDING_CALL_WINDOW = "call-window";
+    public static final String PENDING_CALL_DAILY_LIMIT = "call-daily-limit";
+    public static final String PENDING_CALL_ANSWER_COOLDOWN = "call-answer-cooldown";
     public static final String PENDING_WB_AUTH_PHONE = "wb-auth-phone";
     public static final String PENDING_WB_AUTH_STARTING = "wb-auth-starting";
     public static final String PENDING_WB_AUTH_CODE = "wb-auth-code";
@@ -79,6 +82,26 @@ public class ChatSettingsService {
 
     public void setPhoneNumber(long chatId, String phoneNumber) {
         subscriptionRepository.updatePhoneNumber(chatId, phoneNumber);
+    }
+
+    public void setCallTimeWindow(long chatId, String start, String end) {
+        subscriptionRepository.updateCallTimeWindow(chatId, start, end);
+    }
+
+    public void clearCallTimeWindow(long chatId) {
+        subscriptionRepository.updateCallTimeWindow(chatId, null, null);
+    }
+
+    public void setCallMaxDailyAttempts(long chatId, int maxDailyAttempts) {
+        subscriptionRepository.updateCallMaxDailyAttempts(chatId, maxDailyAttempts);
+    }
+
+    public void setCallAnswerCooldownMinutes(long chatId, int cooldownMinutes) {
+        subscriptionRepository.updateCallAnswerCooldownMinutes(chatId, cooldownMinutes);
+    }
+
+    public void markLastCallAnsweredAt(long chatId, OffsetDateTime answeredAt) {
+        subscriptionRepository.updateLastCallAnsweredAt(chatId, answeredAt);
     }
 
     public void setPendingInputState(long chatId, String state) {

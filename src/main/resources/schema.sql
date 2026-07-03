@@ -12,6 +12,11 @@ create table if not exists chat_subscription (
     alert_parking text,
     call_enabled integer not null default 0,
     phone_number text,
+    call_time_window_start text,
+    call_time_window_end text,
+    call_max_daily_attempts integer not null default 5,
+    call_answer_cooldown_minutes integer not null default 300,
+    last_call_answered_at text,
     pending_input_state text,
     pending_wb_auth_flow_id text,
     pending_wb_auth_phone_number text,
@@ -90,3 +95,25 @@ create table if not exists alert_event (
 
 create index if not exists idx_alert_event_dedupe_key_created_at
     on alert_event(dedupe_key, created_at);
+
+create table if not exists voice_call_attempt (
+    id integer primary key autoincrement,
+    created_at text not null,
+    updated_at text not null,
+    chat_id integer not null,
+    account_id integer not null,
+    trigger_type text not null,
+    phone_number text,
+    provider text,
+    external_id text,
+    status text not null,
+    call_started integer not null default 0,
+    answered_by_human integer not null default 0,
+    details text
+);
+
+create index if not exists idx_voice_call_attempt_account_created_at
+    on voice_call_attempt(account_id, created_at);
+
+create index if not exists idx_voice_call_attempt_chat_account_created_at
+    on voice_call_attempt(chat_id, account_id, created_at);
